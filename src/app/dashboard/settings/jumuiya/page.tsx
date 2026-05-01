@@ -123,7 +123,10 @@ export default async function JumuiyaPage() {
                 (households ?? []).map((h) => {
                   const elderUids = elderUserIdsByHousehold.get(String(h.id)) ?? [];
                   const elderNames = elderUids
-                    .map((uid) => elderNameByUserId.get(uid) ?? "")
+                    .map((uid) => {
+                      const resolved = String(elderNameByUserId.get(uid) ?? "").trim();
+                      return resolved || `User ${uid.slice(0, 8)}`;
+                    })
                     .map((name) => name.trim())
                     .filter(Boolean);
                   const assignedChairUid = chairUserIdByAssignment.get(String(h.id));

@@ -47,12 +47,13 @@ export async function loadEldersForHousehold(
   const elders: LeaderProfile[] = [];
   for (const id of elderIds) {
     const profile = profileMap.get(id);
-    if (!profile) continue;
-    const profilePhone = String(profile.phone ?? "").trim();
+    const profilePhone = String(profile?.phone ?? "").trim();
     const fallbackPhone = memberPhoneByUserId.get(id) ?? null;
+    const displayName =
+      String(profile?.full_name ?? "").trim() || `User ${id.slice(0, 8)}`;
     elders.push({
-      id: String(profile.id),
-      full_name: profile.full_name ?? null,
+      id: String(profile?.id ?? id),
+      full_name: displayName,
       phone: profilePhone || fallbackPhone,
     });
   }
