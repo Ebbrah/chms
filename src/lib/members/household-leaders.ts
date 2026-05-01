@@ -70,12 +70,40 @@ export async function loadChairProfileForHousehold(
     .select("chairperson_user_id")
     .eq("id", householdId)
     .maybeSingle();
-  const uid = h?.chairperson_user_id;
+  let uid = String(h?.chairperson_user_id ?? "").trim();
+  if (!uid) {
+    const { data: assignment } = await supabase
+      .from("jumuiya_chair_assignments")
+      .select("user_id")
+      .eq("household_id", householdId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    uid = String(assignment?.user_id ?? "").trim();
+  }
   if (!uid) return null;
   const { data: p } = await supabase
     .from("profiles")
     .select("id, full_name, phone")
     .eq("id", uid)
     .maybeSingle();
-  return p ?? null;
+  if (!p) return null;
+
+  const profilePhone = String(p.phone ?? "").trim();
+  if (profilePhone) return p;
+
+  const { data: chairMember } = await supabase
+    .from("members")
+    .select("phone, updated_at")
+    .eq("household_id", householdId)
+    .eq("user_id", uid)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return {
+    id: String(p.id),
+    full_name: p.full_name ?? null,
+    phone: String(chairMember?.phone ?? "").trim() || null,
+  };
 }

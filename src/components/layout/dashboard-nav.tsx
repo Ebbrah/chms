@@ -87,6 +87,11 @@ const links: {
     visible: (r) => canFinance(r),
   },
   {
+    href: "/dashboard/finance/trial-balance",
+    label: "Trial balance",
+    visible: (r) => canFinance(r),
+  },
+  {
     href: "/dashboard/finance/cashbook",
     label: "Cashbook",
     visible: (r) => canFinance(r),
