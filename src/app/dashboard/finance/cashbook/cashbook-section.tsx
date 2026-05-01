@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import {
   addCashbookTransaction,
   createCashbookAccount,
-  postCashbookToLedger,
 } from "@/lib/actions/finance";
 import { Button } from "@/components/ui/button";
 import { CurrencyInput } from "@/components/ui/currency-input";
@@ -36,16 +35,13 @@ export function CashbookSection({
   const [glLink, setGlLink] = useState("");
   const [cbId, setCbId] = useState("");
   const [dir, setDir] = useState<string>("in");
-  const [offsetId, setOffsetId] = useState("");
   const [openingBalance, setOpeningBalance] = useState("0");
   const [txnAmount, setTxnAmount] = useState("");
 
   useEffect(() => {
     if (!glLink && glAccounts[0]) setGlLink(glAccounts[0].id);
     if (!cbId && cashbookAccounts[0]) setCbId(cashbookAccounts[0].id);
-    if (!offsetId && glAccounts[1]) setOffsetId(glAccounts[1].id);
-    else if (!offsetId && glAccounts[0]) setOffsetId(glAccounts[0].id);
-  }, [glAccounts, cashbookAccounts, glLink, cbId, offsetId]);
+  }, [glAccounts, cashbookAccounts, glLink, cbId]);
 
   async function onCreateCb(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -83,25 +79,10 @@ export function CashbookSection({
     }
   }
 
-  async function onPost(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setMsg(null);
-    const fd = new FormData(e.currentTarget);
-    const tid = String(fd.get("transaction_id") || "");
-    if (!tid) {
-      setMsg("Enter transaction ID from the table or database.");
-      return;
-    }
-    const res = await postCashbookToLedger(tid, offsetId);
-    if ("error" in res && res.error) setMsg(res.error);
-    else {
-      setMsg("Posted to ledger.");
-      router.refresh();
-    }
-  }
-
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="space-y-2">
+      {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
+      <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Cashbook account</CardTitle>
@@ -193,36 +174,7 @@ export function CashbookSection({
           </form>
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Post to ledger</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={(e) => void onPost(e)} className="grid gap-3">
-            {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
-            <div className="grid gap-2">
-              <Label htmlFor="tid">Transaction ID</Label>
-              <Input id="tid" name="transaction_id" placeholder="uuid" required />
-            </div>
-            <div className="grid gap-2">
-              <Label>Offset GL account</Label>
-              <Select value={offsetId} onValueChange={setOffsetId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {glAccounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.code} — {a.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit">Post</Button>
-          </form>
-        </CardContent>
-      </Card>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { assertBalancedLines } from "@/lib/finance/ledger";
 
+function monthStart(dateLike: string) {
+  const raw = String(dateLike || "").trim();
+  if (!raw) return "";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
 async function orgContext() {
   const supabase = await createClient();
   const {
@@ -16,6 +24,23 @@ async function orgContext() {
     .eq("id", user.id)
     .single();
   return { supabase, user, org_id: profile?.org_id ?? null };
+}
+
+async function assertPeriodOpen(org_id: string, effectiveDate: string) {
+  const supabase = await createClient();
+  const period_month = monthStart(effectiveDate);
+  if (!period_month) return { error: "Invalid posting date" } as const;
+  const { data: lock, error } = await supabase
+    .from("accounting_period_locks")
+    .select("is_closed")
+    .eq("org_id", org_id)
+    .eq("period_month", period_month)
+    .maybeSingle();
+  if (error) return { error: error.message } as const;
+  if (lock?.is_closed) {
+    return { error: `Period ${period_month.slice(0, 7)} is locked. Reopen it before posting.` } as const;
+  }
+  return { ok: true as const, period_month };
 }
 
 export async function createAccount(formData: FormData) {
@@ -458,6 +483,8 @@ export async function createManualJournal(formData: FormData) {
   if (!entry_date || !a1 || !a2 || Number.isNaN(amt) || amt <= 0) {
     return { error: "Invalid journal" };
   }
+  const period = await assertPeriodOpen(org_id, entry_date);
+  if ("error" in period) return { error: period.error };
 
   const lines = [
     { debit: amt, credit: 0 },
@@ -473,6 +500,7 @@ export async function createManualJournal(formData: FormData) {
       description: description || null,
       source_type: "manual",
       created_by: user.id,
+      posted_by: user.id,
     })
     .select("id")
     .single();
@@ -533,6 +561,8 @@ export async function addCashbookTransaction(formData: FormData) {
   if (!cashbook_account_id || !txn_date || Number.isNaN(amount) || amount < 0) {
     return { error: "Invalid transaction" };
   }
+  const period = await assertPeriodOpen(org_id, txn_date);
+  if ("error" in period) return { error: period.error };
 
   const { error } = await supabase.from("cashbook_transactions").insert({
     org_id,
@@ -564,6 +594,8 @@ export async function postCashbookToLedger(
     .single();
   if (e0 || !tx) return { error: e0?.message ?? "Transaction not found" };
   if (tx.journal_entry_id) return { error: "Already posted" };
+  const period = await assertPeriodOpen(org_id, String(tx.txn_date));
+  if ("error" in period) return { error: period.error };
 
   const { data: cba, error: ecb } = await supabase
     .from("cashbook_accounts")
@@ -595,6 +627,7 @@ export async function postCashbookToLedger(
       source_type: "cashbook",
       source_id: transactionId,
       created_by: user.id,
+      posted_by: user.id,
     })
     .select("id")
     .single();
@@ -612,7 +645,12 @@ export async function postCashbookToLedger(
 
   const { error: e3 } = await supabase
     .from("cashbook_transactions")
-    .update({ journal_entry_id: entry.id })
+    .update({
+      journal_entry_id: entry.id,
+      posting_account_id: offsetAccountId,
+      posted_at: new Date().toISOString(),
+      posted_by: user.id,
+    })
     .eq("id", transactionId);
   if (e3) return { error: e3.message };
 
@@ -711,6 +749,8 @@ export async function postPayrollRun(
     .single();
   if (e0 || !run) return { error: e0?.message ?? "Run not found" };
   if (run.journal_entry_id) return { error: "Already posted" };
+  const period = await assertPeriodOpen(org_id, String(run.period_end));
+  if ("error" in period) return { error: period.error };
 
   const { data: lines, error: e1 } = await supabase
     .from("payroll_lines")
@@ -749,6 +789,7 @@ export async function postPayrollRun(
       source_type: "payroll",
       source_id: runId,
       created_by: user.id,
+      posted_by: user.id,
     })
     .select("id")
     .single();
@@ -772,5 +813,355 @@ export async function postPayrollRun(
 
   revalidatePath("/dashboard/finance/payroll");
   revalidatePath("/dashboard/finance/ledger");
+  return { ok: true };
+}
+
+export async function closeAccountingPeriod(periodMonth: string, reason?: string) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const month = monthStart(periodMonth);
+  if (!month) return { error: "Invalid period month" };
+  const payload = {
+    org_id,
+    period_month: month,
+    is_closed: true,
+    closed_at: new Date().toISOString(),
+    closed_by: user.id,
+    close_reason: String(reason ?? "").trim() || null,
+    reopened_at: null,
+    reopened_by: null,
+    reopen_reason: null,
+  };
+  const { error } = await supabase
+    .from("accounting_period_locks")
+    .upsert(payload, { onConflict: "org_id,period_month" });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/finance/ledger");
+  revalidatePath("/dashboard/finance/cashbook");
+  return { ok: true };
+}
+
+export async function reopenAccountingPeriod(periodMonth: string, reason: string) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const month = monthStart(periodMonth);
+  if (!month) return { error: "Invalid period month" };
+  const why = String(reason || "").trim();
+  if (!why) return { error: "Reopen reason is required" };
+  const { error } = await supabase
+    .from("accounting_period_locks")
+    .upsert(
+      {
+        org_id,
+        period_month: month,
+        is_closed: false,
+        reopened_at: new Date().toISOString(),
+        reopened_by: user.id,
+        reopen_reason: why,
+      },
+      { onConflict: "org_id,period_month" },
+    );
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/finance/ledger");
+  revalidatePath("/dashboard/finance/cashbook");
+  return { ok: true };
+}
+
+export async function reverseJournalEntry(entryId: string, reason: string, reversalDate?: string) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const id = String(entryId || "").trim();
+  const why = String(reason || "").trim();
+  if (!id) return { error: "Missing journal entry id" };
+  if (!why) return { error: "Reversal reason is required" };
+
+  const { data: original, error: e0 } = await supabase
+    .from("journal_entries")
+    .select("id, org_id, entry_date, description, source_type, source_id, reversed_by_entry_id")
+    .eq("id", id)
+    .eq("org_id", org_id)
+    .maybeSingle();
+  if (e0) return { error: e0.message };
+  if (!original) return { error: "Journal entry not found" };
+  if (original.reversed_by_entry_id) return { error: "Journal entry already reversed" };
+
+  const reverseOn = String(reversalDate || "").trim() || String(original.entry_date);
+  const period = await assertPeriodOpen(org_id, reverseOn);
+  if ("error" in period) return { error: period.error };
+
+  const { data: originalLines, error: e1 } = await supabase
+    .from("journal_lines")
+    .select("account_id, debit, credit, memo")
+    .eq("journal_entry_id", id);
+  if (e1) return { error: e1.message };
+  if (!originalLines?.length) return { error: "Original journal has no lines" };
+
+  const reversedLines = originalLines.map((ln) => ({
+    account_id: String(ln.account_id),
+    debit: Number(ln.credit ?? 0),
+    credit: Number(ln.debit ?? 0),
+    memo: `Reversal: ${String(ln.memo ?? "").trim()}`.trim(),
+  }));
+  assertBalancedLines(reversedLines.map((l) => ({ debit: l.debit, credit: l.credit })));
+
+  const { data: reversalEntry, error: e2 } = await supabase
+    .from("journal_entries")
+    .insert({
+      org_id,
+      entry_date: reverseOn,
+      description: `Reversal of ${id.slice(0, 8)}: ${String(original.description ?? "").trim()}`.trim(),
+      source_type: "system",
+      source_id: id,
+      created_by: user.id,
+      posted_by: user.id,
+      reversal_of_entry_id: id,
+    })
+    .select("id")
+    .single();
+  if (e2 || !reversalEntry) return { error: e2?.message ?? "Failed to create reversal entry" };
+
+  const { error: e3 } = await supabase.from("journal_lines").insert(
+    reversedLines.map((ln) => ({
+      journal_entry_id: reversalEntry.id,
+      account_id: ln.account_id,
+      debit: ln.debit,
+      credit: ln.credit,
+      memo: ln.memo,
+    })),
+  );
+  if (e3) return { error: e3.message };
+
+  const now = new Date().toISOString();
+  const { error: e4 } = await supabase
+    .from("journal_entries")
+    .update({
+      reversed_by_entry_id: reversalEntry.id,
+      reversed_at: now,
+      reversed_by: user.id,
+      reversal_reason: why,
+    })
+    .eq("id", id)
+    .eq("org_id", org_id);
+  if (e4) return { error: e4.message };
+
+  revalidatePath("/dashboard/finance/ledger");
+  return { ok: true, reversalEntryId: reversalEntry.id };
+}
+
+export async function createOpeningBalanceBatch(formData: FormData) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const periodMonth = monthStart(String(formData.get("period_month") || ""));
+  const fiscalYearId = String(formData.get("fiscal_year_id") || "").trim() || null;
+  const note = String(formData.get("note") || "").trim() || null;
+  if (!periodMonth) return { error: "Invalid period month" };
+
+  const { data: latest } = await supabase
+    .from("opening_balance_batches")
+    .select("version")
+    .eq("org_id", org_id)
+    .eq("period_month", periodMonth)
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextVersion = Number(latest?.version ?? 0) + 1;
+
+  const { data: batch, error } = await supabase
+    .from("opening_balance_batches")
+    .insert({
+      org_id,
+      fiscal_year_id: fiscalYearId,
+      period_month: periodMonth,
+      version: nextVersion,
+      status: "draft",
+      note,
+      created_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !batch) return { error: error?.message ?? "Failed to create opening balance batch" };
+  revalidatePath("/dashboard/finance/ledger");
+  return { ok: true, batchId: batch.id };
+}
+
+export async function addOpeningBalanceLine(formData: FormData) {
+  const { supabase, user } = await orgContext();
+  if (!user) return { error: "Unauthorized" };
+  const batchId = String(formData.get("batch_id") || "").trim();
+  const accountId = String(formData.get("account_id") || "").trim();
+  const debit = Number(formData.get("debit") || 0);
+  const credit = Number(formData.get("credit") || 0);
+  const memo = String(formData.get("memo") || "").trim() || null;
+  if (!batchId || !accountId) return { error: "Batch and account are required" };
+  if (debit <= 0 && credit <= 0) return { error: "Either debit or credit must be greater than zero" };
+  if (debit > 0 && credit > 0) return { error: "Use either debit or credit, not both" };
+
+  const { error } = await supabase.from("opening_balance_lines").insert({
+    batch_id: batchId,
+    account_id: accountId,
+    debit,
+    credit,
+    memo,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/finance/ledger");
+  return { ok: true };
+}
+
+export async function postOpeningBalanceBatch(batchId: string, description?: string) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const id = String(batchId || "").trim();
+  if (!id) return { error: "Missing opening balance batch id" };
+  const { data: batch, error: bErr } = await supabase
+    .from("opening_balance_batches")
+    .select("id, period_month, status, note")
+    .eq("id", id)
+    .eq("org_id", org_id)
+    .maybeSingle();
+  if (bErr) return { error: bErr.message };
+  if (!batch) return { error: "Batch not found" };
+  if (String(batch.status) !== "draft") return { error: "Only draft batches can be posted" };
+
+  const period = await assertPeriodOpen(org_id, String(batch.period_month));
+  if ("error" in period) return { error: period.error };
+
+  const { data: lines, error: lErr } = await supabase
+    .from("opening_balance_lines")
+    .select("account_id, debit, credit, memo")
+    .eq("batch_id", id);
+  if (lErr) return { error: lErr.message };
+  if (!lines?.length) return { error: "Batch has no lines" };
+
+  const jl = lines.map((ln) => ({
+    account_id: String(ln.account_id),
+    debit: Number(ln.debit ?? 0),
+    credit: Number(ln.credit ?? 0),
+    memo: ln.memo,
+  }));
+  assertBalancedLines(jl.map((x) => ({ debit: x.debit, credit: x.credit })));
+
+  const { data: entry, error: e1 } = await supabase
+    .from("journal_entries")
+    .insert({
+      org_id,
+      entry_date: String(batch.period_month),
+      description:
+        String(description ?? "").trim() ||
+        `Opening balances ${String(batch.period_month).slice(0, 7)}`,
+      source_type: "system",
+      source_id: id,
+      created_by: user.id,
+      posted_by: user.id,
+    })
+    .select("id")
+    .single();
+  if (e1 || !entry) return { error: e1?.message ?? "Failed to post opening balance journal" };
+
+  const { error: e2 } = await supabase.from("journal_lines").insert(
+    jl.map((x) => ({
+      journal_entry_id: entry.id,
+      account_id: x.account_id,
+      debit: x.debit,
+      credit: x.credit,
+      memo: x.memo,
+    })),
+  );
+  if (e2) return { error: e2.message };
+
+  const { data: activePosted } = await supabase
+    .from("opening_balance_batches")
+    .select("id")
+    .eq("org_id", org_id)
+    .eq("period_month", String(batch.period_month))
+    .eq("status", "posted");
+  for (const row of activePosted ?? []) {
+    await supabase
+      .from("opening_balance_batches")
+      .update({ status: "superseded", superseded_by_batch_id: id })
+      .eq("id", String(row.id));
+  }
+
+  const { error: e3 } = await supabase
+    .from("opening_balance_batches")
+    .update({
+      status: "posted",
+      posted_journal_entry_id: entry.id,
+      posted_by: user.id,
+      posted_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (e3) return { error: e3.message };
+
+  revalidatePath("/dashboard/finance/ledger");
+  revalidatePath("/dashboard/finance/trial-balance");
+  return { ok: true };
+}
+
+export async function addBankStatementLine(formData: FormData) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const cashbookAccountId = String(formData.get("cashbook_account_id") || "").trim();
+  const statementDate = String(formData.get("statement_date") || "").trim();
+  const amount = Number(formData.get("amount") || 0);
+  const direction = String(formData.get("direction") || "in").trim() as "in" | "out";
+  const description = String(formData.get("description") || "").trim() || null;
+  const reference = String(formData.get("reference") || "").trim() || null;
+  if (!cashbookAccountId || !statementDate || amount <= 0) {
+    return { error: "Cashbook, date and amount are required" };
+  }
+  const { error } = await supabase.from("bank_statement_lines").insert({
+    org_id,
+    cashbook_account_id: cashbookAccountId,
+    statement_date: statementDate,
+    amount,
+    direction,
+    description,
+    reference,
+    source: "manual",
+    created_by: user.id,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/dashboard/finance/bank-reconciliation");
+  return { ok: true };
+}
+
+export async function matchBankStatementToCashbook(
+  statementLineId: string,
+  cashbookTransactionId: string,
+  note?: string,
+) {
+  const { supabase, user, org_id } = await orgContext();
+  if (!user || !org_id) return { error: "Unauthorized" };
+  const sid = String(statementLineId || "").trim();
+  const tid = String(cashbookTransactionId || "").trim();
+  if (!sid || !tid) return { error: "Statement line and cashbook transaction are required" };
+
+  const { data: statement, error: sErr } = await supabase
+    .from("bank_statement_lines")
+    .select("id, amount")
+    .eq("id", sid)
+    .eq("org_id", org_id)
+    .maybeSingle();
+  if (sErr) return { error: sErr.message };
+  if (!statement) return { error: "Statement line not found" };
+
+  const { error: mErr } = await supabase.from("bank_reconciliation_matches").insert({
+    org_id,
+    statement_line_id: sid,
+    cashbook_transaction_id: tid,
+    matched_amount: Number(statement.amount ?? 0),
+    note: String(note ?? "").trim() || null,
+    matched_by: user.id,
+  });
+  if (mErr) return { error: mErr.message };
+
+  const { error: uErr } = await supabase
+    .from("bank_statement_lines")
+    .update({ matched_at: new Date().toISOString(), matched_by: user.id })
+    .eq("id", sid);
+  if (uErr) return { error: uErr.message };
+
+  revalidatePath("/dashboard/finance/bank-reconciliation");
   return { ok: true };
 }

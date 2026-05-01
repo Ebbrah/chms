@@ -1,13 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { CashbookSection } from "./cashbook-section";
+import { CashbookTransactionsTable } from "./cashbook-transactions-table";
 
 export default async function CashbookPage() {
   const supabase = await createClient();
@@ -35,48 +28,23 @@ export default async function CashbookPage() {
         glAccounts={accounts ?? []}
         cashbookAccounts={cbAccounts ?? []}
       />
-      <div className="rounded-md border border-border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Date</TableHead>
-              <TableHead>Cashbook</TableHead>
-              <TableHead>Dir</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead>Payee / memo</TableHead>
-              <TableHead>Posted</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {(txns ?? []).length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No transactions.
-                </TableCell>
-              </TableRow>
-            ) : (
-              (txns ?? []).map((t) => {
-                const cb = (cbAccounts ?? []).find((c) => c.id === t.cashbook_account_id);
-                const gl = cb?.accounts as { code?: string } | null;
-                return (
-                  <TableRow key={t.id as string}>
-                    <TableCell>{String(t.txn_date)}</TableCell>
-                    <TableCell>
-                      {cb?.name} ({gl?.code})
-                    </TableCell>
-                    <TableCell>{String(t.direction)}</TableCell>
-                    <TableCell className="text-right">{Number(t.amount).toFixed(2)}</TableCell>
-                    <TableCell className="max-w-[200px] truncate">
-                      {String(t.payee_payor ?? "")} {String(t.memo ?? "")}
-                    </TableCell>
-                    <TableCell>{t.journal_entry_id ? "yes" : "no"}</TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <CashbookTransactionsTable
+        transactions={
+          ((txns ?? []) as {
+            id: string;
+            txn_date: string;
+            cashbook_account_id: string;
+            direction: "in" | "out";
+            amount: number;
+            payee_payor?: string | null;
+            memo?: string | null;
+            journal_entry_id?: string | null;
+            posting_account_id?: string | null;
+          }[])
+        }
+        cashbookAccounts={((cbAccounts ?? []) as { id: string; name?: string; accounts?: { code?: string } | null }[])}
+        glAccounts={((accounts ?? []) as { id: string; code?: string; name?: string }[])}
+      />
     </div>
   );
 }

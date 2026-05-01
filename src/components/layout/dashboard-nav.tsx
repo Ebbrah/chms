@@ -92,8 +92,28 @@ const links: {
     visible: (r) => canFinance(r),
   },
   {
+    href: "/dashboard/finance/income-statement",
+    label: "Income statement",
+    visible: (r) => canFinance(r),
+  },
+  {
+    href: "/dashboard/finance/balance-sheet",
+    label: "Balance sheet",
+    visible: (r) => canFinance(r),
+  },
+  {
+    href: "/dashboard/finance/cash-flow",
+    label: "Cash flow",
+    visible: (r) => canFinance(r),
+  },
+  {
     href: "/dashboard/finance/cashbook",
     label: "Cashbook",
+    visible: (r) => canFinance(r),
+  },
+  {
+    href: "/dashboard/finance/bank-reconciliation",
+    label: "Bank reconciliation",
     visible: (r) => canFinance(r),
   },
   {
