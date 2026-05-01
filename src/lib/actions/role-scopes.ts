@@ -71,7 +71,28 @@ export async function assignChurchElderToJumuiya(formData: FormData) {
   const householdId = String(formData.get("household_id") || "");
   if (!userId || !householdId) return { error: "Mzee wa kanisa and jumuiya are required" };
 
-  await supabase.from("jumuiya_elder_assignments").delete().eq("org_id", orgId).eq("household_id", householdId);
+  const { data: alreadyAssigned } = await supabase
+    .from("jumuiya_elder_assignments")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("household_id", householdId)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  if (alreadyAssigned?.id) {
+    return { error: "This elder is already assigned to that jumuiya" };
+  }
+
+  const { count, error: countErr } = await supabase
+    .from("jumuiya_elder_assignments")
+    .select("id", { count: "exact", head: true })
+    .eq("org_id", orgId)
+    .eq("household_id", householdId);
+  if (countErr) return { error: countErr.message };
+  if (Number(count ?? 0) >= 2) {
+    return { error: "This jumuiya already has 2 church elders assigned" };
+  }
+
   const { error } = await supabase.from("jumuiya_elder_assignments").insert({
     org_id: orgId,
     user_id: userId,

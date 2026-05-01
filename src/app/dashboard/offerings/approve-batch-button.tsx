@@ -20,6 +20,9 @@ export function ApproveBatchButton({ batchId }: { batchId: string }) {
         return;
       }
       router.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not approve this batch.";
+      setMsg(message);
     } finally {
       setPending(false);
     }

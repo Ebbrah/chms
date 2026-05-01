@@ -74,10 +74,15 @@ export default async function JumuiyaPage() {
 
   const { data: elderAssignments } = await supabase
     .from("jumuiya_elder_assignments")
-    .select("household_id, user_id");
-  const elderUserIdByHousehold = new Map(
-    (elderAssignments ?? []).map((r) => [String(r.household_id), String(r.user_id)]),
-  );
+    .select("household_id, user_id, created_at")
+    .order("created_at", { ascending: true });
+  const elderUserIdsByHousehold = new Map<string, string[]>();
+  for (const row of elderAssignments ?? []) {
+    const hid = String(row.household_id);
+    const uid = String(row.user_id);
+    if (!elderUserIdsByHousehold.has(hid)) elderUserIdsByHousehold.set(hid, []);
+    elderUserIdsByHousehold.get(hid)!.push(uid);
+  }
   const elderUserIds = Array.from(new Set((elderAssignments ?? []).map((r) => String(r.user_id))));
   const { data: elderProfiles } = elderUserIds.length
     ? await supabase.from("profiles").select("id, full_name").in("id", elderUserIds)
@@ -102,7 +107,7 @@ export default async function JumuiyaPage() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Mwenyekiti wa Jumuiya</TableHead>
-                <TableHead>Mzee wa kanisa</TableHead>
+                <TableHead>Wazee wa kanisa</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -116,8 +121,11 @@ export default async function JumuiyaPage() {
                 </TableRow>
               ) : (
                 (households ?? []).map((h) => {
-                  const elderUid = elderUserIdByHousehold.get(String(h.id));
-                  const elderNm = elderUid ? elderNameByUserId.get(elderUid) : "";
+                  const elderUids = elderUserIdsByHousehold.get(String(h.id)) ?? [];
+                  const elderNames = elderUids
+                    .map((uid) => elderNameByUserId.get(uid) ?? "")
+                    .map((name) => name.trim())
+                    .filter(Boolean);
                   const assignedChairUid = chairUserIdByAssignment.get(String(h.id));
                   const effectiveChairUid = assignedChairUid || String(h.chairperson_user_id ?? "");
                   const chairDisplay =
@@ -128,7 +136,7 @@ export default async function JumuiyaPage() {
                     <TableRow key={h.id}>
                       <TableCell>{h.name ?? "—"}</TableCell>
                       <TableCell>{chairDisplay}</TableCell>
-                      <TableCell>{elderNm || "—"}</TableCell>
+                      <TableCell>{elderNames.length ? elderNames.join(", ") : "—"}</TableCell>
                       <TableCell>
                         {h.created_at ? new Date(h.created_at).toLocaleString() : "—"}
                       </TableCell>

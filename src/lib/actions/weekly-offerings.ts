@@ -605,120 +605,136 @@ export async function saveWeeklyCollectiveOffering(
  * Treasurer (or admin) posts approved weekly totals to the ledger (cash debit revenue credit).
  */
 export async function approveOfferingWeekBatch(batchId: string) {
-  const roles = await getMyRoles();
-  if (!canApproveOfferingBatch(roles)) {
-    return { error: "Only the treasurer can approve offering batches" };
+  try {
+    const roles = await getMyRoles();
+    if (!canApproveOfferingBatch(roles)) {
+      return { error: "Only the treasurer can approve offering batches" };
+    }
+
+    const { supabase, user, orgId } = await orgContext();
+    if (!user || !orgId) return { error: "Unauthorized" };
+
+    const { data: batch, error: bErr } = await supabase
+      .from("offering_week_batches")
+      .select("id,status,org_id")
+      .eq("id", batchId)
+      .eq("org_id", orgId)
+      .single();
+
+    if (bErr || !batch) return { error: "Batch not found" };
+    if (batch.status !== "authorized") return { error: "Batch must be authorized first" };
+
+    const { data: lines, error: lErr } = await supabase
+      .from("offerings")
+      .select("id,amount,offering_type_id, budget_posted, offering_types(name)")
+      .eq("batch_id", batchId)
+      .eq("org_id", orgId);
+
+    if (lErr) return { error: lErr.message };
+    if (!lines?.length) return { error: "No offerings in this batch" };
+
+    const unposted = lines.filter((o) => !o.budget_posted);
+    if (!unposted.length) return { error: "Nothing to post" };
+
+    let total = 0;
+    for (const o of unposted) {
+      const amount = Number(o.amount);
+      if (!Number.isFinite(amount) || amount < 0) {
+        return {
+          error: `Invalid offering amount found in this batch (offering ${String(o.id).slice(0, 8)}…). Edit that row and try again.`,
+        };
+      }
+      total += amount;
+    }
+    if (!Number.isFinite(total) || total <= 0) {
+      return { error: "Batch total is invalid. Verify offering amounts, then try approval again." };
+    }
+
+    const { data: cash } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("type", "asset")
+      .eq("is_active", true)
+      .order("code")
+      .limit(1)
+      .maybeSingle();
+
+    const { data: revenue } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("type", "revenue")
+      .eq("is_active", true)
+      .order("code")
+      .limit(1)
+      .maybeSingle();
+
+    if (!cash?.id || !revenue?.id) {
+      return { error: "Configure at least one asset (cash) and one revenue account first" };
+    }
+
+    const jl: { account_id: string; debit: number; credit: number; memo: string }[] = [
+      { account_id: cash.id, debit: total, credit: 0, memo: "Cash — weekly offerings" },
+      { account_id: revenue.id, debit: 0, credit: total, memo: "Offerings — weekly batch" },
+    ];
+
+    assertBalancedLines(jl.map((l) => ({ debit: l.debit, credit: l.credit })));
+
+    const { data: entry, error: eErr } = await supabase
+      .from("journal_entries")
+      .insert({
+        org_id: orgId,
+        entry_date: new Date().toISOString().slice(0, 10),
+        description: `Weekly offerings approved (${batchId.slice(0, 8)}…)`,
+        source_type: "offering",
+        source_id: batchId,
+        created_by: user.id,
+      })
+      .select("id")
+      .single();
+
+    if (eErr || !entry) return { error: eErr?.message ?? "Journal failed" };
+
+    const { error: jlErr } = await supabase.from("journal_lines").insert(
+      jl.map((l) => ({
+        journal_entry_id: entry.id,
+        account_id: l.account_id,
+        debit: l.debit,
+        credit: l.credit,
+        memo: l.memo,
+      })),
+    );
+    if (jlErr) return { error: jlErr.message };
+
+    const ids = unposted.map((o) => o.id);
+    const { error: upErr } = await supabase
+      .from("offerings")
+      .update({ budget_posted: true })
+      .in("id", ids);
+
+    if (upErr) return { error: upErr.message };
+
+    const { error: batchUp } = await supabase
+      .from("offering_week_batches")
+      .update({
+        status: "approved",
+        approved_by: user.id,
+        approved_at: new Date().toISOString(),
+        journal_entry_id: entry.id,
+      })
+      .eq("id", batchId);
+
+    if (batchUp) return { error: batchUp.message };
+
+    revalidatePath("/dashboard/offerings");
+    revalidatePath("/dashboard/finance/budget");
+    revalidatePath("/dashboard/finance/ledger");
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected approval error";
+    return { error: message };
   }
-
-  const { supabase, user, orgId } = await orgContext();
-  if (!user || !orgId) return { error: "Unauthorized" };
-
-  const { data: batch, error: bErr } = await supabase
-    .from("offering_week_batches")
-    .select("id,status,org_id")
-    .eq("id", batchId)
-    .eq("org_id", orgId)
-    .single();
-
-  if (bErr || !batch) return { error: "Batch not found" };
-  if (batch.status !== "authorized") return { error: "Batch must be authorized first" };
-
-  const { data: lines, error: lErr } = await supabase
-    .from("offerings")
-    .select("id,amount,offering_type_id, budget_posted, offering_types(name)")
-    .eq("batch_id", batchId)
-    .eq("org_id", orgId);
-
-  if (lErr) return { error: lErr.message };
-  if (!lines?.length) return { error: "No offerings in this batch" };
-
-  const unposted = lines.filter((o) => !o.budget_posted);
-  if (!unposted.length) return { error: "Nothing to post" };
-
-  let total = 0;
-  for (const o of unposted) total += Number(o.amount);
-
-  const { data: cash } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("type", "asset")
-    .eq("is_active", true)
-    .order("code")
-    .limit(1)
-    .maybeSingle();
-
-  const { data: revenue } = await supabase
-    .from("accounts")
-    .select("id")
-    .eq("org_id", orgId)
-    .eq("type", "revenue")
-    .eq("is_active", true)
-    .order("code")
-    .limit(1)
-    .maybeSingle();
-
-  if (!cash?.id || !revenue?.id) {
-    return { error: "Configure at least one asset (cash) and one revenue account first" };
-  }
-
-  const jl: { account_id: string; debit: number; credit: number; memo: string }[] = [
-    { account_id: cash.id, debit: total, credit: 0, memo: "Cash — weekly offerings" },
-    { account_id: revenue.id, debit: 0, credit: total, memo: "Offerings — weekly batch" },
-  ];
-
-  assertBalancedLines(jl.map((l) => ({ debit: l.debit, credit: l.credit })));
-
-  const { data: entry, error: eErr } = await supabase
-    .from("journal_entries")
-    .insert({
-      org_id: orgId,
-      entry_date: new Date().toISOString().slice(0, 10),
-      description: `Weekly offerings approved (${batchId.slice(0, 8)}…)`,
-      source_type: "offering",
-      source_id: batchId,
-      created_by: user.id,
-    })
-    .select("id")
-    .single();
-
-  if (eErr || !entry) return { error: eErr?.message ?? "Journal failed" };
-
-  const { error: jlErr } = await supabase.from("journal_lines").insert(
-    jl.map((l) => ({
-      journal_entry_id: entry.id,
-      account_id: l.account_id,
-      debit: l.debit,
-      credit: l.credit,
-      memo: l.memo,
-    })),
-  );
-  if (jlErr) return { error: jlErr.message };
-
-  const ids = unposted.map((o) => o.id);
-  const { error: upErr } = await supabase
-    .from("offerings")
-    .update({ budget_posted: true })
-    .in("id", ids);
-
-  if (upErr) return { error: upErr.message };
-
-  const { error: batchUp } = await supabase
-    .from("offering_week_batches")
-    .update({
-      status: "approved",
-      approved_by: user.id,
-      approved_at: new Date().toISOString(),
-      journal_entry_id: entry.id,
-    })
-    .eq("id", batchId);
-
-  if (batchUp) return { error: batchUp.message };
-
-  revalidatePath("/dashboard/offerings");
-  revalidatePath("/dashboard/finance/budget");
-  revalidatePath("/dashboard/finance/ledger");
-  return { ok: true };
 }
 
 export async function authorizeOfferingWeekBatch(batchId: string) {
