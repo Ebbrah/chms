@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button-link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -199,12 +200,7 @@ export default async function OfferingBatchDetailPage({
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Batch details</h1>
         </div>
-        <Link
-          href="/dashboard/offerings"
-          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-        >
-          Back to offerings
-        </Link>
+        <ButtonLink href="/dashboard/offerings">Back to offerings</ButtonLink>
       </div>
 
       <Card>
@@ -393,16 +389,16 @@ export default async function OfferingBatchDetailPage({
             </span>
             <div className="flex items-center gap-3">
               {safeEnvelopePage > 1 ? (
-                <Link href={envelopePageHref(safeEnvelopePage - 1)} className="text-primary hover:underline">
+                <ButtonLink href={envelopePageHref(safeEnvelopePage - 1)} variant="outline" size="sm">
                   Previous
-                </Link>
+                </ButtonLink>
               ) : (
                 <span className="opacity-50">Previous</span>
               )}
               {safeEnvelopePage < totalEnvelopePages ? (
-                <Link href={envelopePageHref(safeEnvelopePage + 1)} className="text-primary hover:underline">
+                <ButtonLink href={envelopePageHref(safeEnvelopePage + 1)} variant="outline" size="sm">
                   Next
-                </Link>
+                </ButtonLink>
               ) : (
                 <span className="opacity-50">Next</span>
               )}

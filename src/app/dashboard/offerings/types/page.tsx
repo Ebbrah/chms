@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button-link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getMyRoles } from "@/lib/auth/session";
@@ -19,12 +19,7 @@ export default async function OfferingTypesPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Offering types</h1>
         </div>
-        <Link
-          href="/dashboard/offerings"
-          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-        >
-          Back to offerings
-        </Link>
+        <ButtonLink href="/dashboard/offerings">Back to offerings</ButtonLink>
       </div>
       <Card>
         <CardHeader>

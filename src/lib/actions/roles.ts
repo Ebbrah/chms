@@ -54,6 +54,58 @@ export async function removeUserRole(userId: string, role: AppRole) {
     .eq("role", role)
     .eq("org_id", me.org_id);
   if (error) return { error: error.message };
+
+  // Keep scoped-assignment tables in sync when a role is removed.
+  if (role === "church_elder") {
+    const { error: elderScopeErr } = await supabase
+      .from("jumuiya_elder_assignments")
+      .delete()
+      .eq("org_id", me.org_id)
+      .eq("user_id", userId);
+    if (elderScopeErr) return { error: elderScopeErr.message };
+  }
+
+  if (role === "jumuiya_chairman") {
+    const { error: chairScopeErr } = await supabase
+      .from("jumuiya_chair_assignments")
+      .delete()
+      .eq("org_id", me.org_id)
+      .eq("user_id", userId);
+    if (chairScopeErr) return { error: chairScopeErr.message };
+
+    const { error: householdChairErr } = await supabase
+      .from("households")
+      .update({
+        chairperson_user_id: null,
+        chairperson_name: null,
+      })
+      .eq("org_id", me.org_id)
+      .eq("chairperson_user_id", userId);
+    if (householdChairErr) return { error: householdChairErr.message };
+  }
+
+  if (role === "committee_head") {
+    const { error: committeeScopeErr } = await supabase
+      .from("committee_heads")
+      .delete()
+      .eq("org_id", me.org_id)
+      .eq("user_id", userId);
+    if (committeeScopeErr) return { error: committeeScopeErr.message };
+
+    const { error: committeeChairErr } = await supabase
+      .from("committees")
+      .update({
+        chairperson_user_id: null,
+        chairperson_name: null,
+      })
+      .eq("org_id", me.org_id)
+      .eq("chairperson_user_id", userId);
+    if (committeeChairErr) return { error: committeeChairErr.message };
+  }
+
   revalidatePath("/dashboard/settings/roles");
+  revalidatePath("/dashboard/settings/jumuiya");
+  revalidatePath("/dashboard/settings/committees");
+  revalidatePath("/dashboard/page");
   return { ok: true };
 }

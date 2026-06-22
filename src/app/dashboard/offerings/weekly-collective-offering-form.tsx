@@ -54,7 +54,13 @@ export function WeeklyCollectiveOfferingForm({
       }
       setMsg("Collective offering saved.");
       setAmount("");
-      router.refresh();
+      if ("batchId" in res && res.batchId) {
+        router.push(
+          `/dashboard/offerings?registeredBatchId=${encodeURIComponent(String(res.batchId))}&collectivePage=1#other-offerings-preview`,
+        );
+      } else {
+        router.refresh();
+      }
     } finally {
       setPending(false);
     }
@@ -129,7 +135,7 @@ export function WeeklyCollectiveOfferingForm({
           onClick={() => void onSave()}
           disabled={pending || !offeringTypeId || offeringTypes.length === 0}
         >
-          {pending ? "Saving…" : "Save collective offering"}
+          {pending ? "Saving…" : "Save / Hifadhi"}
         </Button>
       </div>
 

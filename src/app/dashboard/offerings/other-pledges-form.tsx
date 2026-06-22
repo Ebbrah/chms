@@ -138,7 +138,13 @@ export function OtherPledgesForm({
       setManualFullName("");
       setManualPhone("");
       setManualJumuiya("");
-      router.refresh();
+      if ("batchId" in res && res.batchId) {
+        router.push(
+          `/dashboard/offerings?registeredBatchId=${encodeURIComponent(String(res.batchId))}#registered-offerings`,
+        );
+      } else {
+        router.refresh();
+      }
     } finally {
       setPending(false);
     }
@@ -286,7 +292,7 @@ export function OtherPledgesForm({
         </div>
       </div>
       <Button type="button" onClick={() => void onSave()} disabled={pending}>
-        {pending ? "Inahifadhi…" : "Hifadhi ahadi"}
+        {pending ? "Saving…" : "Save / Hifadhi"}
       </Button>
       {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
       {err ? <p className="text-sm text-destructive">{err}</p> : null}

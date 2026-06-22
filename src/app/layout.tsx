@@ -16,20 +16,29 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ChMS — Church Management",
+  title: "Ebenezer ChMS",
   description: "Members, offerings, finance, and reports for your church.",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png", sizes: "32x32" },
+      { url: "/icons/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icons/icon-512.png", type: "image/png", sizes: "512x512" },
+      { url: "/icons/favicon.ico", sizes: "48x48" },
+    ],
+    apple: [{ url: "/apple-icon.png", type: "image/png", sizes: "180x180" }],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "ChMS",
+    title: "Ebenezer ChMS",
   },
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#E47300" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
 };
 

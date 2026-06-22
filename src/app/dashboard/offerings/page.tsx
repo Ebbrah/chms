@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +27,7 @@ import { getChurchLocalDateISO, isChurchLocalSunday } from "@/lib/offering/churc
 import {
   OFFERING_BATCH_SLOT_FIRST_SERVICE,
   OFFERING_BATCH_SLOT_MIDWEEK,
+  isEnvelopeOfferingTypeName,
   offeringBatchSlotLabel,
 } from "@/lib/offering/weekly";
 import { OfferingTypeForm } from "./offering-type-form";
@@ -37,6 +39,24 @@ import { RejectBatchButton } from "./reject-batch-button";
 import { SectionTitleWithInfo } from "@/components/offerings/section-title-with-info";
 import { OfferingAmountEditField } from "./offering-amount-edit-field";
 import { OtherPledgesForm } from "./other-pledges-form";
+import { OfferingsSectionScroll } from "@/components/offerings/offerings-section-scroll";
+import { ButtonLink } from "@/components/ui/button-link";
+import { matchesOfferingAmountSearch } from "@/lib/offering/table-search";
+
+const OFFERINGS_SECTION_IDS = {
+  registered: "registered-offerings",
+  unregistered: "unregistered-offerings",
+  collective: "other-offerings-preview",
+  batches: "recent-batches",
+} as const;
+
+type OfferingsSectionId = (typeof OFFERINGS_SECTION_IDS)[keyof typeof OFFERINGS_SECTION_IDS];
+
+function withOfferingsSection(path: string, section?: OfferingsSectionId) {
+  if (!section) return path;
+  const base = path.split("#")[0] ?? path;
+  return `${base}#${section}`;
+}
 
 export default async function OfferingsPage({
   searchParams,
@@ -48,6 +68,13 @@ export default async function OfferingsPage({
     registeredBatchId?: string;
     regPage?: string;
     unregPage?: string;
+    /** Filter registered offerings table by offering # or amount */
+    regSearch?: string;
+    /** Filter unregistered offerings by offering # snapshot */
+    unregSearch?: string;
+    collectivePage?: string;
+    /** Filter other (collective) offerings by type name */
+    collectiveSearch?: string;
   }>;
 }) {
   const supabase = await createClient();
@@ -73,6 +100,17 @@ export default async function OfferingsPage({
   const parsedUnregPage = Number(params.unregPage ?? "1");
   const unregPage =
     Number.isFinite(parsedUnregPage) && parsedUnregPage > 0 ? Math.floor(parsedUnregPage) : 1;
+  const regSearchRaw = String(params.regSearch ?? "").trim();
+  const unregSearchRaw = String(params.unregSearch ?? "").trim();
+  const parsedCollectivePage = Number(params.collectivePage ?? "1");
+  const collectivePage =
+    Number.isFinite(parsedCollectivePage) && parsedCollectivePage > 0
+      ? Math.floor(parsedCollectivePage)
+      : 1;
+  const collectiveSearchRaw = String(params.collectiveSearch ?? "").trim();
+  const regSearchNorm = regSearchRaw.toLowerCase();
+  const unregSearchNorm = unregSearchRaw.toLowerCase();
+  const collectiveSearchNorm = collectiveSearchRaw.toLowerCase();
   const treasurerOnly =
     hasRole(roles, "treasurer") &&
     !hasRole(roles, "admin") &&
@@ -153,6 +191,16 @@ export default async function OfferingsPage({
     rowPosted: boolean;
   };
 
+  type OtherOfferingRow = {
+    key: string;
+    offeringId: string;
+    dateLabel: string;
+    typeName: string;
+    amount: number;
+    editable: boolean;
+    rowPosted: boolean;
+  };
+
   type UnregisteredRow = {
     key: string;
     dateLabel: string;
@@ -160,19 +208,46 @@ export default async function OfferingsPage({
     ahadiAmount: number;
     jengoAmount: number;
     dayosisiAmount: number;
+    ahadiOfferingId: string | null;
+    jengoOfferingId: string | null;
+    dayosisiOfferingId: string | null;
+    editableAhadi: boolean;
+    editableJengo: boolean;
+    editableDayosisi: boolean;
     rowPosted: boolean;
   };
 
   const registeredMap = new Map<string, RegisteredRow>();
   const unregisteredMap = new Map<string, UnregisteredRow>();
+  const otherOfferingsRowsUnfiltered: OtherOfferingRow[] = [];
   for (const o of offerings ?? []) {
     const otRaw = o.offering_types as { name?: string } | { name?: string }[] | null;
-    const otName = String((Array.isArray(otRaw) ? otRaw[0]?.name : otRaw?.name) ?? "").toLowerCase();
+    const typeDisplayName = String((Array.isArray(otRaw) ? otRaw[0]?.name : otRaw?.name) ?? "");
+    const otName = typeDisplayName.toLowerCase();
     const amount = Number(o.amount);
     if (!Number.isFinite(amount)) continue;
+    const batch = o.offering_week_batches as { status?: string } | { status?: string }[] | null;
+    const batchStatus = String((Array.isArray(batch) ? batch[0]?.status : batch?.status) ?? "");
+    const editable =
+      canEditOfferings &&
+      !o.budget_posted &&
+      (batchStatus === "pending_authorization" || batchStatus === "rejected");
     if (!o.member_id) {
       const snapshot = String((o as { offering_number_snapshot?: string }).offering_number_snapshot ?? "").trim();
-      if (!snapshot) continue;
+      if (!snapshot) {
+        if (!isEnvelopeOfferingTypeName(typeDisplayName)) {
+          otherOfferingsRowsUnfiltered.push({
+            key: String(o.id),
+            offeringId: String(o.id),
+            dateLabel: o.received_at ? new Date(String(o.received_at)).toLocaleString() : "—",
+            typeName: typeDisplayName || "—",
+            amount,
+            editable,
+            rowPosted: Boolean(o.budget_posted),
+          });
+        }
+        continue;
+      }
       const key = `${String(o.batch_id ?? "none")}::${snapshot.toLowerCase()}`;
       if (!unregisteredMap.has(key)) {
         unregisteredMap.set(key, {
@@ -182,23 +257,36 @@ export default async function OfferingsPage({
           ahadiAmount: 0,
           jengoAmount: 0,
           dayosisiAmount: 0,
+          ahadiOfferingId: null,
+          jengoOfferingId: null,
+          dayosisiOfferingId: null,
+          editableAhadi: false,
+          editableJengo: false,
+          editableDayosisi: false,
           rowPosted: Boolean(o.budget_posted),
         });
       }
       const row = unregisteredMap.get(key)!;
       row.rowPosted = row.rowPosted && Boolean(o.budget_posted);
-      if (otName.includes("ahadi")) row.ahadiAmount += amount;
-      else if (otName.includes("jengo")) row.jengoAmount += amount;
-      else if (otName.includes("maendeleo") || otName.includes("dayosisi")) row.dayosisiAmount += amount;
+      if (otName.includes("ahadi")) {
+        row.ahadiAmount += amount;
+        row.ahadiOfferingId ??= o.id;
+        row.editableAhadi = row.editableAhadi || editable;
+      } else if (otName.includes("jengo")) {
+        row.jengoAmount += amount;
+        row.jengoOfferingId ??= o.id;
+        row.editableJengo = row.editableJengo || editable;
+      } else if (otName.includes("maendeleo") || otName.includes("dayosisi")) {
+        row.dayosisiAmount += amount;
+        row.dayosisiOfferingId ??= o.id;
+        row.editableDayosisi = row.editableDayosisi || editable;
+      }
       continue;
     }
-    const mem = o.members as { user_id?: string; offering_number?: string } | null;
-    const batch = o.offering_week_batches as { status?: string } | { status?: string }[] | null;
-    const batchStatus = String((Array.isArray(batch) ? batch[0]?.status : batch?.status) ?? "");
-    const editable =
-      canEditOfferings &&
-      !o.budget_posted &&
-      (batchStatus === "pending_authorization" || batchStatus === "rejected");
+    const mem = o.members as {
+      user_id?: string;
+      offering_number?: string;
+    } | null;
     const key = `${String(o.batch_id ?? "none")}::${String(o.member_id)}`;
 
     if (!registeredMap.has(key)) {
@@ -236,8 +324,39 @@ export default async function OfferingsPage({
       row.editableDayosisi = row.editableDayosisi || editable;
     }
   }
-  const registeredRows = Array.from(registeredMap.values());
-  const unregisteredRows = Array.from(unregisteredMap.values());
+  const registeredRowsUnfiltered = Array.from(registeredMap.values());
+  const unregisteredRowsUnfiltered = Array.from(unregisteredMap.values());
+
+  let registeredRows = registeredRowsUnfiltered;
+  let unregisteredRows = unregisteredRowsUnfiltered;
+  let otherOfferingRows = otherOfferingsRowsUnfiltered;
+
+  if (regSearchNorm) {
+    registeredRows = registeredRows.filter((r) => {
+      const num = String(r.offeringNumber ?? "").toLowerCase();
+      if (num.includes(regSearchNorm)) return true;
+      return matchesOfferingAmountSearch(regSearchRaw, [
+        r.ahadiAmount,
+        r.jengoAmount,
+        r.dayosisiAmount,
+      ]);
+    });
+  }
+  if (unregSearchNorm) {
+    unregisteredRows = unregisteredRows.filter((r) => {
+      if (String(r.offeringNumber ?? "").toLowerCase().includes(unregSearchNorm)) return true;
+      return matchesOfferingAmountSearch(unregSearchRaw, [
+        r.ahadiAmount,
+        r.jengoAmount,
+        r.dayosisiAmount,
+      ]);
+    });
+  }
+  if (collectiveSearchNorm) {
+    otherOfferingRows = otherOfferingRows.filter((r) =>
+      String(r.typeName ?? "").toLowerCase().includes(collectiveSearchNorm),
+    );
+  }
 
   const registeredTotalPages = Math.max(1, Math.ceil(registeredRows.length / offeringsTablePageSize));
   const safeRegPage = Math.min(regPage, registeredTotalPages);
@@ -248,6 +367,17 @@ export default async function OfferingsPage({
   const safeUnregPage = Math.min(unregPage, unregisteredTotalPages);
   const unregFrom = (safeUnregPage - 1) * offeringsTablePageSize;
   const unregisteredRowsPage = unregisteredRows.slice(unregFrom, unregFrom + offeringsTablePageSize);
+
+  const collectiveTotalPages = Math.max(
+    1,
+    Math.ceil(otherOfferingRows.length / offeringsTablePageSize),
+  );
+  const safeCollectivePage = Math.min(collectivePage, collectiveTotalPages);
+  const collectiveFrom = (safeCollectivePage - 1) * offeringsTablePageSize;
+  const otherOfferingRowsPage = otherOfferingRows.slice(
+    collectiveFrom,
+    collectiveFrom + offeringsTablePageSize,
+  );
 
   const registeredTotals = registeredRows.reduce(
     (acc, r) => {
@@ -269,6 +399,8 @@ export default async function OfferingsPage({
     { ahadi: 0, jengo: 0, dayosisi: 0 },
   );
 
+  const otherOfferingTotal = otherOfferingRows.reduce((sum, r) => sum + r.amount, 0);
+
   const batchPageHref = (page: number) => {
     const q = new URLSearchParams();
     if (batchSearch) q.set("batchSearch", batchSearch);
@@ -277,7 +409,11 @@ export default async function OfferingsPage({
     q.set("batchPage", String(page));
     q.set("regPage", String(safeRegPage));
     q.set("unregPage", String(safeUnregPage));
-    return `/dashboard/offerings?${q.toString()}`;
+    q.set("collectivePage", String(safeCollectivePage));
+    if (regSearchRaw) q.set("regSearch", regSearchRaw);
+    if (unregSearchRaw) q.set("unregSearch", unregSearchRaw);
+    if (collectiveSearchRaw) q.set("collectiveSearch", collectiveSearchRaw);
+    return withOfferingsSection(`/dashboard/offerings?${q.toString()}`, OFFERINGS_SECTION_IDS.batches);
   };
   const registeredBatchHref = (batchId: string) => {
     const q = new URLSearchParams();
@@ -287,10 +423,21 @@ export default async function OfferingsPage({
     q.set("registeredBatchId", batchId);
     q.set("regPage", "1");
     q.set("unregPage", "1");
-    return `/dashboard/offerings?${q.toString()}`;
+    q.set("collectivePage", "1");
+    if (regSearchRaw) q.set("regSearch", regSearchRaw);
+    if (unregSearchRaw) q.set("unregSearch", unregSearchRaw);
+    if (collectiveSearchRaw) q.set("collectiveSearch", collectiveSearchRaw);
+    return withOfferingsSection(`/dashboard/offerings?${q.toString()}`, OFFERINGS_SECTION_IDS.registered);
   };
 
-  const offeringsTableQuery = (patch: { regPage?: number; unregPage?: number }) => {
+  const offeringsTableQuery = (
+    patch: {
+      regPage?: number;
+      unregPage?: number;
+      collectivePage?: number;
+    },
+    section: OfferingsSectionId = OFFERINGS_SECTION_IDS.registered,
+  ) => {
     const q = new URLSearchParams();
     if (batchSearch) q.set("batchSearch", batchSearch);
     if (batchStatus) q.set("batchStatus", batchStatus);
@@ -298,7 +445,36 @@ export default async function OfferingsPage({
     if (selectedRegisteredBatchId) q.set("registeredBatchId", selectedRegisteredBatchId);
     q.set("regPage", String(patch.regPage ?? safeRegPage));
     q.set("unregPage", String(patch.unregPage ?? safeUnregPage));
-    return `/dashboard/offerings?${q.toString()}`;
+    q.set("collectivePage", String(patch.collectivePage ?? safeCollectivePage));
+    if (regSearchRaw) q.set("regSearch", regSearchRaw);
+    if (unregSearchRaw) q.set("unregSearch", unregSearchRaw);
+    if (collectiveSearchRaw) q.set("collectiveSearch", collectiveSearchRaw);
+    return withOfferingsSection(`/dashboard/offerings?${q.toString()}`, section);
+  };
+
+  const offeringsMemberSearchHref = (
+    next: {
+      regSearch?: string;
+      unregSearch?: string;
+      collectiveSearch?: string;
+    },
+    section: OfferingsSectionId,
+  ) => {
+    const q = new URLSearchParams();
+    if (batchSearch) q.set("batchSearch", batchSearch);
+    if (batchStatus) q.set("batchStatus", batchStatus);
+    q.set("batchPage", String(safeBatchPage));
+    if (selectedRegisteredBatchId) q.set("registeredBatchId", selectedRegisteredBatchId);
+    q.set("regPage", "1");
+    q.set("unregPage", "1");
+    q.set("collectivePage", "1");
+    const rs = next.regSearch !== undefined ? next.regSearch : regSearchRaw;
+    const us = next.unregSearch !== undefined ? next.unregSearch : unregSearchRaw;
+    const cs = next.collectiveSearch !== undefined ? next.collectiveSearch : collectiveSearchRaw;
+    if (rs.trim()) q.set("regSearch", rs.trim());
+    if (us.trim()) q.set("unregSearch", us.trim());
+    if (cs.trim()) q.set("collectiveSearch", cs.trim());
+    return withOfferingsSection(`/dashboard/offerings?${q.toString()}`, section);
   };
 
   const batchDupIndexById = new Map<string, number>();
@@ -343,23 +519,16 @@ export default async function OfferingsPage({
 
   return (
     <div className="space-y-6">
+      <Suspense fallback={null}>
+        <OfferingsSectionScroll />
+      </Suspense>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Offerings</h1>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href="/dashboard/my-offerings"
-            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            My offerings
-          </Link>
-          <Link
-            href="/dashboard/offerings/reports"
-            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Offering reports
-          </Link>
+          <ButtonLink href="/dashboard/my-offerings">My offerings</ButtonLink>
+          <ButtonLink href="/dashboard/offerings/reports">Offering reports</ButtonLink>
         </div>
       </div>
 
@@ -377,7 +546,7 @@ export default async function OfferingsPage({
       {canUseAllOfferingInputs ? (
         <Card>
           <CardHeader>
-            <SectionTitleWithInfo title="Collective service offerings">
+            <SectionTitleWithInfo title="Sadaka Nyinginezo (Other Offerings)">
               Pick the batch (1, 2, or 3) that matches the service you are recording. Batch 3 unlocks after batch 2 is
               approved if your church uses two Sunday services; otherwise it unlocks after batch 1 is approved.
             </SectionTitleWithInfo>
@@ -395,7 +564,7 @@ export default async function OfferingsPage({
       {canUseAllOfferingInputs ? (
         <Card>
           <CardHeader>
-            <SectionTitleWithInfo title="Other pledges">
+            <SectionTitleWithInfo title="Ahadi nyinginezo (Other Pledges)">
               Choose the same batch as the Sunday service or mid-week period you are recording for. You can record
               both registered members and unregistered congregants.
             </SectionTitleWithInfo>
@@ -408,23 +577,73 @@ export default async function OfferingsPage({
         </Card>
       ) : null}
 
-      <Card>
+      <Card id={OFFERINGS_SECTION_IDS.registered}>
         <CardHeader className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-lg">Registered offerings</CardTitle>
+          <CardTitle className="text-lg">
+            Sadaka za Wiki - Waliojisajili (Registered Offerings)
+          </CardTitle>
           {registeredRows.length > 0 ? (
             <p className="text-xs text-muted-foreground">
               Page {safeRegPage} of {registeredTotalPages} · rows {regFrom + 1}–
               {Math.min(regFrom + offeringsTablePageSize, registeredRows.length)} of {registeredRows.length}
+              {regSearchRaw ? ` (filtered)` : ""}
             </p>
           ) : null}
         </CardHeader>
         <CardContent className="space-y-0 p-0">
+          {registeredRowsUnfiltered.length > 0 ? (
+            <form
+              method="GET"
+              action={`/dashboard/offerings#${OFFERINGS_SECTION_IDS.registered}`}
+              className="flex flex-wrap items-end gap-2 border-b px-4 py-3"
+            >
+              <input type="hidden" name="batchPage" value={String(safeBatchPage)} />
+              {selectedRegisteredBatchId ? (
+                <input type="hidden" name="registeredBatchId" value={selectedRegisteredBatchId} />
+              ) : null}
+              <input type="hidden" name="regPage" value="1" />
+              <input type="hidden" name="unregPage" value={String(safeUnregPage)} />
+              <input type="hidden" name="collectivePage" value={String(safeCollectivePage)} />
+              {batchSearch ? <input type="hidden" name="batchSearch" value={batchSearch} /> : null}
+              {batchStatus ? <input type="hidden" name="batchStatus" value={batchStatus} /> : null}
+              {unregSearchRaw ? <input type="hidden" name="unregSearch" value={unregSearchRaw} /> : null}
+              {collectiveSearchRaw ? (
+                <input type="hidden" name="collectiveSearch" value={collectiveSearchRaw} />
+              ) : null}
+              <div className="grid gap-1">
+                <label htmlFor="regSearch" className="text-xs text-muted-foreground">
+                  Search by offering # or amount
+                </label>
+                <input
+                  id="regSearch"
+                  name="regSearch"
+                  defaultValue={regSearchRaw}
+                  placeholder="e.g. 42 or 5000"
+                  className="flex h-9 w-[min(100%,280px)] rounded-md border border-input bg-background px-3 py-1 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+              >
+                Search
+              </button>
+              {regSearchRaw ? (
+                <ButtonLink
+                  href={offeringsMemberSearchHref({ regSearch: "" }, OFFERINGS_SECTION_IDS.registered)}
+                  variant="outline"
+                >
+                  Clear
+                </ButtonLink>
+              ) : null}
+            </form>
+          ) : null}
           <div className="max-h-[min(22rem,55vh)] overflow-y-auto border-b">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
-                  <TableHead>Offering # / member</TableHead>
+                  <TableHead>Offering #</TableHead>
                   <TableHead className="text-right">Ahadi (TZS)</TableHead>
                   <TableHead className="text-right">Jengo (TZS)</TableHead>
                   <TableHead className="text-right">Dayosisi (TZS)</TableHead>
@@ -432,10 +651,16 @@ export default async function OfferingsPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {registeredRows.length === 0 ? (
+                {registeredRowsUnfiltered.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground">
                       No offerings recorded.
+                    </TableCell>
+                  </TableRow>
+                ) : registeredRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      No rows match this search.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -444,14 +669,11 @@ export default async function OfferingsPage({
                       <TableCell>{row.dateLabel}</TableCell>
                       <TableCell>
                         {row.memberHref ? (
-                          <Link
-                            href={row.memberHref}
-                            className="font-medium text-primary underline-offset-4 hover:underline"
-                          >
+                          <Link href={row.memberHref} className="font-medium text-primary hover:underline">
                             {row.offeringNumber}
                           </Link>
                         ) : (
-                          row.offeringNumber
+                          <span className="font-medium">{row.offeringNumber}</span>
                         )}
                       </TableCell>
                       <TableCell className="text-right">
@@ -485,28 +707,32 @@ export default async function OfferingsPage({
           {registeredRows.length > 0 ? (
             <div className="flex flex-col gap-2 border-b px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="text-muted-foreground">
-                <span className="font-medium text-foreground">Batch total (all rows)</span> — Ahadi{" "}
-                {formatAmountTZS(registeredTotals.ahadi)}, Jengo {formatAmountTZS(registeredTotals.jengo)}, Dayosisi{" "}
-                {formatAmountTZS(registeredTotals.dayosisi)}
+                <span className="font-medium text-foreground">
+                  {regSearchRaw ? "Subtotal (filtered rows)" : "Batch total (all rows)"}
+                </span>{" "}
+                — Ahadi {formatAmountTZS(registeredTotals.ahadi)}, Jengo{" "}
+                {formatAmountTZS(registeredTotals.jengo)}, Dayosisi {formatAmountTZS(registeredTotals.dayosisi)}
               </div>
               <div className="flex items-center gap-3">
                 {safeRegPage > 1 ? (
-                  <Link
-                    href={offeringsTableQuery({ regPage: safeRegPage - 1 })}
-                    className="text-primary hover:underline"
+                  <ButtonLink
+                    href={offeringsTableQuery({ regPage: safeRegPage - 1 }, OFFERINGS_SECTION_IDS.registered)}
+                    variant="outline"
+                    size="sm"
                   >
                     Previous
-                  </Link>
+                  </ButtonLink>
                 ) : (
                   <span className="opacity-50">Previous</span>
                 )}
                 {safeRegPage < registeredTotalPages ? (
-                  <Link
-                    href={offeringsTableQuery({ regPage: safeRegPage + 1 })}
-                    className="text-primary hover:underline"
+                  <ButtonLink
+                    href={offeringsTableQuery({ regPage: safeRegPage + 1 }, OFFERINGS_SECTION_IDS.registered)}
+                    variant="outline"
+                    size="sm"
                   >
                     Next
-                  </Link>
+                  </ButtonLink>
                 ) : (
                   <span className="opacity-50">Next</span>
                 )}
@@ -516,16 +742,66 @@ export default async function OfferingsPage({
         </CardContent>
       </Card>
 
-      {unregisteredRows.length > 0 ? (
-        <Card>
+      {unregisteredRowsUnfiltered.length > 0 ? (
+        <Card id={OFFERINGS_SECTION_IDS.unregistered}>
           <CardHeader className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle className="text-lg">Unregistered (will auto-link later)</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Page {safeUnregPage} of {unregisteredTotalPages} · rows {unregFrom + 1}–
-              {Math.min(unregFrom + offeringsTablePageSize, unregisteredRows.length)} of {unregisteredRows.length}
-            </p>
+            <CardTitle className="text-lg">
+              Sadaka za Wiki - Wasiojisajili (Unregistered Offerings)
+            </CardTitle>
+            {unregisteredRows.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Page {safeUnregPage} of {unregisteredTotalPages} · rows {unregFrom + 1}–
+                {Math.min(unregFrom + offeringsTablePageSize, unregisteredRows.length)} of {unregisteredRows.length}
+                {unregSearchRaw ? ` (filtered)` : ""}
+              </p>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-0 p-0">
+            <form
+              method="GET"
+              action={`/dashboard/offerings#${OFFERINGS_SECTION_IDS.unregistered}`}
+              className="flex flex-wrap items-end gap-2 border-b px-4 py-3"
+            >
+              <input type="hidden" name="batchPage" value={String(safeBatchPage)} />
+              {selectedRegisteredBatchId ? (
+                <input type="hidden" name="registeredBatchId" value={selectedRegisteredBatchId} />
+              ) : null}
+              <input type="hidden" name="regPage" value={String(safeRegPage)} />
+              <input type="hidden" name="unregPage" value="1" />
+              <input type="hidden" name="collectivePage" value={String(safeCollectivePage)} />
+              {batchSearch ? <input type="hidden" name="batchSearch" value={batchSearch} /> : null}
+              {batchStatus ? <input type="hidden" name="batchStatus" value={batchStatus} /> : null}
+              {regSearchRaw ? <input type="hidden" name="regSearch" value={regSearchRaw} /> : null}
+              {collectiveSearchRaw ? (
+                <input type="hidden" name="collectiveSearch" value={collectiveSearchRaw} />
+              ) : null}
+              <div className="grid gap-1">
+                <label htmlFor="unregSearch" className="text-xs text-muted-foreground">
+                  Search by offering # or amount
+                </label>
+                <input
+                  id="unregSearch"
+                  name="unregSearch"
+                  defaultValue={unregSearchRaw}
+                  placeholder="e.g. 105 or 5000"
+                  className="flex h-9 w-[min(100%,220px)] rounded-md border border-input bg-background px-3 py-1 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+              >
+                Search
+              </button>
+              {unregSearchRaw ? (
+                <ButtonLink
+                  href={offeringsMemberSearchHref({ unregSearch: "" }, OFFERINGS_SECTION_IDS.unregistered)}
+                  variant="outline"
+                >
+                  Clear
+                </ButtonLink>
+              ) : null}
+            </form>
             <div className="max-h-[min(22rem,55vh)] overflow-y-auto border-b">
               <Table>
                 <TableHeader>
@@ -539,69 +815,243 @@ export default async function OfferingsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {unregisteredRowsPage.map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>{row.dateLabel}</TableCell>
-                      <TableCell className="font-medium">{row.offeringNumber}</TableCell>
-                      <TableCell className="text-right">
-                        {row.ahadiAmount > 0 ? formatAmountTZS(row.ahadiAmount) : "—"}
+                  {unregisteredRows.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        No rows match this search.
                       </TableCell>
-                      <TableCell className="text-right">
-                        {row.jengoAmount > 0 ? formatAmountTZS(row.jengoAmount) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {row.dayosisiAmount > 0 ? formatAmountTZS(row.dayosisiAmount) : "—"}
-                      </TableCell>
-                      <TableCell>{row.rowPosted ? "Yes" : "No"}</TableCell>
                     </TableRow>
-                  ))}
+                  ) : (
+                    unregisteredRowsPage.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell>{row.dateLabel}</TableCell>
+                        <TableCell className="font-medium">{row.offeringNumber}</TableCell>
+                        <TableCell className="text-right">
+                          <OfferingAmountEditField
+                            offeringId={row.ahadiOfferingId}
+                            amount={row.ahadiAmount}
+                            editable={row.editableAhadi}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <OfferingAmountEditField
+                            offeringId={row.jengoOfferingId}
+                            amount={row.jengoAmount}
+                            editable={row.editableJengo}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <OfferingAmountEditField
+                            offeringId={row.dayosisiOfferingId}
+                            amount={row.dayosisiAmount}
+                            editable={row.editableDayosisi}
+                          />
+                        </TableCell>
+                        <TableCell>{row.rowPosted ? "Yes" : "No"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </div>
+            {unregisteredRows.length > 0 ? (
+              <div className="flex flex-col gap-2 border-b px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {unregSearchRaw ? "Subtotal (filtered unregistered)" : "Batch total (unregistered)"}
+                  </span>{" "}
+                  — Ahadi {formatAmountTZS(unregisteredTotals.ahadi)}, Jengo{" "}
+                  {formatAmountTZS(unregisteredTotals.jengo)}, Dayosisi {formatAmountTZS(unregisteredTotals.dayosisi)}
+                </div>
+                <div className="flex items-center justify-end gap-3">
+                  {safeUnregPage > 1 ? (
+                    <ButtonLink
+                      href={offeringsTableQuery({ unregPage: safeUnregPage - 1 }, OFFERINGS_SECTION_IDS.unregistered)}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Previous
+                    </ButtonLink>
+                  ) : (
+                    <span className="opacity-50">Previous</span>
+                  )}
+                  {safeUnregPage < unregisteredTotalPages ? (
+                    <ButtonLink
+                      href={offeringsTableQuery({ unregPage: safeUnregPage + 1 }, OFFERINGS_SECTION_IDS.unregistered)}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Next
+                    </ButtonLink>
+                  ) : (
+                    <span className="opacity-50">Next</span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card id={OFFERINGS_SECTION_IDS.collective}>
+        <CardHeader className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-lg">Sadaka nyinginezo (Other Offerings) preview</CardTitle>
+          {otherOfferingRows.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Page {safeCollectivePage} of {collectiveTotalPages} · rows {collectiveFrom + 1}–
+              {Math.min(collectiveFrom + offeringsTablePageSize, otherOfferingRows.length)} of{" "}
+              {otherOfferingRows.length}
+              {collectiveSearchRaw ? " (filtered)" : ""}
+            </p>
+          ) : null}
+        </CardHeader>
+        <CardContent className="space-y-0 p-0">
+          {otherOfferingsRowsUnfiltered.length > 0 ? (
+            <form
+              method="GET"
+              action={`/dashboard/offerings#${OFFERINGS_SECTION_IDS.collective}`}
+              className="flex flex-wrap items-end gap-2 border-b px-4 py-3"
+            >
+              <input type="hidden" name="batchPage" value={String(safeBatchPage)} />
+              {selectedRegisteredBatchId ? (
+                <input type="hidden" name="registeredBatchId" value={selectedRegisteredBatchId} />
+              ) : null}
+              <input type="hidden" name="collectivePage" value="1" />
+              <input type="hidden" name="regPage" value={String(safeRegPage)} />
+              <input type="hidden" name="unregPage" value={String(safeUnregPage)} />
+              {batchSearch ? <input type="hidden" name="batchSearch" value={batchSearch} /> : null}
+              {batchStatus ? <input type="hidden" name="batchStatus" value={batchStatus} /> : null}
+              {regSearchRaw ? <input type="hidden" name="regSearch" value={regSearchRaw} /> : null}
+              {unregSearchRaw ? <input type="hidden" name="unregSearch" value={unregSearchRaw} /> : null}
+              <div className="grid gap-1">
+                <label htmlFor="collectiveSearch" className="text-xs text-muted-foreground">
+                  Search by offering type
+                </label>
+                <input
+                  id="collectiveSearch"
+                  name="collectiveSearch"
+                  defaultValue={collectiveSearchRaw}
+                  placeholder="e.g. Ujenzi"
+                  className="flex h-9 w-[min(100%,280px)] rounded-md border border-input bg-background px-3 py-1 text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+              >
+                Search
+              </button>
+              {collectiveSearchRaw ? (
+                <ButtonLink
+                  href={offeringsMemberSearchHref({ collectiveSearch: "" }, OFFERINGS_SECTION_IDS.collective)}
+                  variant="outline"
+                >
+                  Clear
+                </ButtonLink>
+              ) : null}
+            </form>
+          ) : null}
+          <div className="max-h-[min(22rem,55vh)] overflow-y-auto border-b">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Offering type</TableHead>
+                  <TableHead className="text-right">Amount (TZS)</TableHead>
+                  <TableHead>Posted</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {otherOfferingsRowsUnfiltered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No other offerings in this batch. Record them under Sadaka Nyinginezo (Other Offerings), or
+                      select another batch in Recent Batches.
+                    </TableCell>
+                  </TableRow>
+                ) : otherOfferingRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No rows match this search.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  otherOfferingRowsPage.map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell>{row.dateLabel}</TableCell>
+                      <TableCell className="font-medium">{row.typeName}</TableCell>
+                      <TableCell className="text-right">
+                        <OfferingAmountEditField
+                          offeringId={row.offeringId}
+                          amount={row.amount}
+                          editable={row.editable}
+                        />
+                      </TableCell>
+                      <TableCell>{row.rowPosted ? "Yes" : "No"}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {otherOfferingRows.length > 0 ? (
             <div className="flex flex-col gap-2 border-b px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="text-muted-foreground">
-                <span className="font-medium text-foreground">Batch total (unregistered)</span> — Ahadi{" "}
-                {formatAmountTZS(unregisteredTotals.ahadi)}, Jengo {formatAmountTZS(unregisteredTotals.jengo)}, Dayosisi{" "}
-                {formatAmountTZS(unregisteredTotals.dayosisi)}
+                <span className="font-medium text-foreground">
+                  {collectiveSearchRaw ? "Subtotal (filtered rows)" : "Batch total (other offerings)"}
+                </span>{" "}
+                — {formatAmountTZS(otherOfferingTotal)}
               </div>
-              <div className="flex items-center justify-end gap-3">
-                {safeUnregPage > 1 ? (
-                  <Link
-                    href={offeringsTableQuery({ unregPage: safeUnregPage - 1 })}
-                    className="text-primary hover:underline"
+              <div className="flex items-center gap-3">
+                {safeCollectivePage > 1 ? (
+                  <ButtonLink
+                    href={offeringsTableQuery({ collectivePage: safeCollectivePage - 1 }, OFFERINGS_SECTION_IDS.collective)}
+                    variant="outline"
+                    size="sm"
                   >
                     Previous
-                  </Link>
+                  </ButtonLink>
                 ) : (
                   <span className="opacity-50">Previous</span>
                 )}
-                {safeUnregPage < unregisteredTotalPages ? (
-                  <Link
-                    href={offeringsTableQuery({ unregPage: safeUnregPage + 1 })}
-                    className="text-primary hover:underline"
+                {safeCollectivePage < collectiveTotalPages ? (
+                  <ButtonLink
+                    href={offeringsTableQuery({ collectivePage: safeCollectivePage + 1 }, OFFERINGS_SECTION_IDS.collective)}
+                    variant="outline"
+                    size="sm"
                   >
                     Next
-                  </Link>
+                  </ButtonLink>
                 ) : (
                   <span className="opacity-50">Next</span>
                 )}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      ) : null}
+          ) : null}
+        </CardContent>
+      </Card>
 
-      <Card>
+      <Card id={OFFERINGS_SECTION_IDS.batches}>
         <CardHeader>
           <CardTitle className="text-lg">Recent Batches</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form className="flex flex-wrap items-end gap-2 rounded-md border border-border p-3">
+          <form
+            method="GET"
+            action={`/dashboard/offerings#${OFFERINGS_SECTION_IDS.batches}`}
+            className="flex flex-wrap items-end gap-2 rounded-md border border-border p-3"
+          >
             {selectedRegisteredBatchId ? (
               <input type="hidden" name="registeredBatchId" value={selectedRegisteredBatchId} />
             ) : null}
             <input type="hidden" name="regPage" value="1" />
             <input type="hidden" name="unregPage" value="1" />
+            <input type="hidden" name="collectivePage" value="1" />
+            {regSearchRaw ? <input type="hidden" name="regSearch" value={regSearchRaw} /> : null}
+            {unregSearchRaw ? <input type="hidden" name="unregSearch" value={unregSearchRaw} /> : null}
+            {collectiveSearchRaw ? (
+              <input type="hidden" name="collectiveSearch" value={collectiveSearchRaw} />
+            ) : null}
             <div className="grid gap-1">
               <label htmlFor="batchSearch" className="text-xs text-muted-foreground">
                 Search by date/status
@@ -637,12 +1087,9 @@ export default async function OfferingsPage({
             >
               Search
             </button>
-            <Link
-              href="/dashboard/offerings"
-              className="inline-flex h-9 items-center justify-center rounded-md border border-input px-4 text-sm"
-            >
+            <ButtonLink href={withOfferingsSection("/dashboard/offerings", OFFERINGS_SECTION_IDS.batches)}>
               Clear
-            </Link>
+            </ButtonLink>
           </form>
 
           <div className="rounded-md border border-border">
@@ -699,12 +1146,9 @@ export default async function OfferingsPage({
                           {String(b.id) === selectedRegisteredBatchId ? (
                             <span className="text-xs text-muted-foreground">Loaded</span>
                           ) : null}
-                          <Link
-                            href={`/dashboard/offerings/batches/${b.id}`}
-                            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-                          >
+                          <ButtonLink href={`/dashboard/offerings/batches/${b.id}`} variant="outline" size="sm">
                             View
-                          </Link>
+                          </ButtonLink>
                           {(b.status === "pending_authorization" || b.status === "rejected") &&
                           canAuthorize ? (
                             <AuthorizeBatchButton batchId={b.id} />
@@ -730,16 +1174,16 @@ export default async function OfferingsPage({
             </span>
             <div className="flex items-center gap-3">
               {safeBatchPage > 1 ? (
-                <Link href={batchPageHref(safeBatchPage - 1)} className="text-primary hover:underline">
+                <ButtonLink href={batchPageHref(safeBatchPage - 1)} variant="outline" size="sm">
                   Previous
-                </Link>
+                </ButtonLink>
               ) : (
                 <span className="opacity-50">Previous</span>
               )}
               {safeBatchPage < totalBatchPages ? (
-                <Link href={batchPageHref(safeBatchPage + 1)} className="text-primary hover:underline">
+                <ButtonLink href={batchPageHref(safeBatchPage + 1)} variant="outline" size="sm">
                   Next
-                </Link>
+                </ButtonLink>
               ) : (
                 <span className="opacity-50">Next</span>
               )}

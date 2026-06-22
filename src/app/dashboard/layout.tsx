@@ -21,7 +21,8 @@ export default async function DashboardLayout({
       <aside className="hidden w-56 shrink-0 border-r border-border md:block">
         <div className="flex h-14 items-center border-b border-border px-4">
           <Link href="/dashboard" className="text-lg font-semibold tracking-tight">
-            ChMS
+            <span className="text-primary">Ebenezer</span>{" "}
+            <span className="text-foreground">ChMS</span>
           </Link>
         </div>
         <ScrollArea className="h-[calc(100vh-3.5rem)]">
@@ -31,7 +32,8 @@ export default async function DashboardLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-border px-2 py-2 md:hidden">
           <Link href="/dashboard" className="px-2 font-semibold">
-            ChMS
+            <span className="text-primary">Ebenezer</span>{" "}
+            <span className="text-foreground">ChMS</span>
           </Link>
           <Separator orientation="vertical" className="h-6" />
           <ScrollArea className="flex-1 whitespace-nowrap">

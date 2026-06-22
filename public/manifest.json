@@ -1,12 +1,18 @@
 {
-  "name": "Church Management System",
-  "short_name": "ChMS",
-  "description": "Members, offerings, finance, and reports.",
+  "name": "Ebenezer ChMS",
+  "short_name": "Ebenezer",
+  "description": "Members, offerings, finance, and reports for your church.",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#171717",
+  "theme_color": "#E47300",
   "icons": [
+    {
+      "src": "/icons/luther-rose.png",
+      "sizes": "133x131",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",

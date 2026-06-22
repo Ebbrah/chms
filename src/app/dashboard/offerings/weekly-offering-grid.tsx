@@ -330,7 +330,7 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
 
       <div className="flex justify-end border-t pt-4">
         <Button type="button" size="lg" onClick={() => void onSave()} disabled={pending}>
-          {pending ? "Saving…" : "Save weekly offerings"}
+          {pending ? "Saving…" : "Save / Hifadhi"}
         </Button>
       </div>
     </div>

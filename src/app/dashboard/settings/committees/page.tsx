@@ -93,7 +93,7 @@ export default async function CommitteesPage() {
                       {c.created_at ? new Date(c.created_at).toLocaleString() : "—"}
                     </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="link" asChild>
+                    <Button variant="outline" size="sm" asChild>
                       <Link href={`/dashboard/settings/committees/${c.id}`}>Edit</Link>
                     </Button>
                   </TableCell>

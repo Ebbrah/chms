@@ -5,6 +5,25 @@ import { createClient } from "@/lib/supabase/server";
 import { getMyRoles } from "@/lib/auth/session";
 import { hasRole } from "@/lib/auth/permissions";
 
+function parseDataUrlImage(
+  dataUrl: string,
+): { contentType: string; bytes: Uint8Array; extension: string } | null {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) return null;
+
+  const contentType = match[1];
+  const base64 = match[2];
+  const bytes = Buffer.from(base64, "base64");
+
+  let extension = "jpg";
+  if (contentType.includes("png")) extension = "png";
+  else if (contentType.includes("webp")) extension = "webp";
+  else if (contentType.includes("gif")) extension = "gif";
+  else if (contentType.includes("jpeg") || contentType.includes("jpg")) extension = "jpg";
+
+  return { contentType, bytes, extension };
+}
+
 async function orgContext() {
   const supabase = await createClient();
   const {
@@ -32,7 +51,9 @@ export async function createCongregationNote(formData: FormData) {
   const title = String(formData.get("title") || "").trim();
   const body = String(formData.get("body") || "").trim();
   const scope = String(formData.get("scope") || "global");
-  if (!title || !body) return { error: "Title and message are required" };
+  const imageDataUrl = String(formData.get("image_data_url") || "").trim();
+  if (!title) return { error: "Title is required" };
+  if (!body && !imageDataUrl) return { error: "Write a message or upload a poster/flier image" };
 
   let household_id: string | null = null;
   if (scope === "jumuiya") {
@@ -62,12 +83,30 @@ export async function createCongregationNote(formData: FormData) {
     }
   }
 
+  let imagePath: string | null = null;
+  let imageUrl: string | null = null;
+
+  if (imageDataUrl) {
+    const parsed = parseDataUrlImage(imageDataUrl);
+    if (!parsed) return { error: "Invalid poster/flier image format" };
+    const path = `${org_id}/${user.id}/notes-${Date.now()}.${parsed.extension}`;
+    const upload = await supabase.storage
+      .from("congregation-note-media")
+      .upload(path, parsed.bytes, { contentType: parsed.contentType, upsert: true });
+    if (upload.error) return { error: upload.error.message };
+    const { data } = supabase.storage.from("congregation-note-media").getPublicUrl(path);
+    imagePath = path;
+    imageUrl = data.publicUrl;
+  }
+
   const { error } = await supabase.from("congregation_notes").insert({
     org_id,
     author_user_id: user.id,
     title,
-    body,
+    body: body || "",
     household_id,
+    image_path: imagePath,
+    image_url: imageUrl,
   });
   if (error) return { error: error.message };
 
@@ -82,8 +121,20 @@ export async function deleteCongregationNote(noteId: string) {
   const id = String(noteId ?? "").trim();
   if (!id) return { error: "Missing note id" };
 
+  const { data: noteBeforeDelete } = await supabase
+    .from("congregation_notes")
+    .select("image_path")
+    .eq("id", id)
+    .eq("org_id", org_id)
+    .maybeSingle();
+
   const { error } = await supabase.from("congregation_notes").delete().eq("id", id).eq("org_id", org_id);
   if (error) return { error: error.message };
+
+  const imagePath = String(noteBeforeDelete?.image_path ?? "").trim();
+  if (imagePath) {
+    await supabase.storage.from("congregation-note-media").remove([imagePath]);
+  }
 
   revalidatePath("/dashboard");
   return { ok: true };

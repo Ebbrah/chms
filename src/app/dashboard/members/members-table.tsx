@@ -74,7 +74,7 @@ export function MembersTable({
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Email/User ID</TableHead>
+              <TableHead>Email</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Offering no.</TableHead>
               <TableHead>Status</TableHead>
@@ -99,10 +99,9 @@ export function MembersTable({
                         {toDisplayCaps(p.full_name)}
                       </Link>
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell>
                       <Link href={detailHref} className="block w-full">
-                        <div>{m?.email ?? p.email ?? "—"}</div>
-                        <div className="font-mono text-muted-foreground">{p.id}</div>
+                        {m?.email ?? p.email ?? "—"}
                       </Link>
                     </TableCell>
                     <TableCell>
@@ -121,10 +120,10 @@ export function MembersTable({
                       </Link>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="link" asChild>
+                      <Button variant="outline" size="sm" asChild>
                         <Link href={detailHref}>View</Link>
                       </Button>
-                      <Button variant="link" asChild>
+                      <Button variant="outline" size="sm" asChild>
                         <Link href={`/dashboard/members/${p.id}`}>Edit</Link>
                       </Button>
                       <LoadSeedButton userId={p.id} />

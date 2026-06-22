@@ -1,5 +1,4 @@
 import { Badge } from "@/components/ui/badge";
-import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMyRoles, getProfile } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +15,7 @@ import { toDisplayCaps } from "@/lib/format/name";
 import { canPastoral, hasRole } from "@/lib/auth/permissions";
 import { CongregationNotesCard } from "./congregation-notes-card";
 import { loadChairProfileForHousehold, loadEldersForHousehold } from "@/lib/members/household-leaders";
+import { DashboardAvatarUploader } from "./dashboard-avatar-uploader";
 
 export default async function DashboardHomePage() {
   const profile = await getProfile();
@@ -82,7 +82,7 @@ export default async function DashboardHomePage() {
   const isCommitteeHead = hasRole(roles, "committee_head");
   const { data: notesRows } = await supabase
     .from("congregation_notes")
-    .select("id, title, body, created_at, author_user_id, household_id")
+    .select("id, title, body, image_url, created_at, author_user_id, household_id")
     .order("created_at", { ascending: false })
     .limit(20);
   const authorIds = Array.from(
@@ -96,6 +96,7 @@ export default async function DashboardHomePage() {
     id: String(n.id),
     title: String(n.title ?? ""),
     body: String(n.body ?? ""),
+    image_url: n.image_url ? String(n.image_url) : null,
     created_at: String(n.created_at ?? ""),
     author_user_id: String(n.author_user_id ?? ""),
     author_name: authorMap.get(String(n.author_user_id ?? "")) ?? "Unknown",
@@ -155,15 +156,7 @@ export default async function DashboardHomePage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
         </div>
-        {avatarUrl ? (
-          <Image
-            src={avatarUrl}
-            alt="User profile"
-            width={64}
-            height={64}
-            className="h-16 w-16 rounded-full border object-cover"
-          />
-        ) : null}
+        <DashboardAvatarUploader avatarUrl={avatarUrl} />
       </div>
       <Card>
         <CardHeader>

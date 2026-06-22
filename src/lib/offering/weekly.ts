@@ -23,6 +23,17 @@ export const WEEKLY_OFFERING_TYPE_NAMES = [
 
 export type WeeklyOfferingColumn = (typeof WEEKLY_OFFERING_TYPE_NAMES)[number];
 
+/** Ahadi / Jengo / Dayosisi — recorded on envelopes, not via collective service form. */
+export function isEnvelopeOfferingTypeName(typeName: string): boolean {
+  const n = typeName.toLowerCase();
+  return (
+    n.includes("ahadi") ||
+    n.includes("jengo") ||
+    n.includes("maendeleo") ||
+    n.includes("dayosisi")
+  );
+}
+
 export type WeeklyOfferingRowInput = {
   offering_number: string;
   ahadi: number;

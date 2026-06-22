@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createCongregationNote, deleteCongregationNote } from "@/lib/actions/congregation-notes";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -15,6 +16,7 @@ type NoteRow = {
   id: string;
   title: string;
   body: string;
+  image_url: string | null;
   created_at: string;
   author_user_id: string;
   author_name: string;
@@ -52,7 +54,18 @@ export function CongregationNotesCard({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState("");
+  const [isPosterMode, setIsPosterMode] = useState(false);
   const [scope, setScope] = useState(canPostGlobal ? "global" : "jumuiya");
+
+  function onPosterPicked(file: File | null) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImageDataUrl(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.readAsDataURL(file);
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -61,6 +74,9 @@ export function CongregationNotesCard({
     fd.set("title", title);
     fd.set("body", body);
     fd.set("scope", scope);
+    if (imageDataUrl.startsWith("data:image/")) {
+      fd.set("image_data_url", imageDataUrl);
+    }
     const res = await createCongregationNote(fd);
     if ("error" in res && res.error) {
       setMsg(res.error);
@@ -68,6 +84,8 @@ export function CongregationNotesCard({
     }
     setTitle("");
     setBody("");
+    setImageDataUrl("");
+    setIsPosterMode(false);
     setMsg("Taarifa imehifadhiwa.");
     router.refresh();
   }
@@ -103,10 +121,55 @@ export function CongregationNotesCard({
               <Label htmlFor="note-title">Kichwa</Label>
               <Input id="note-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="note-body">Ujumbe</Label>
-              <Textarea id="note-body" value={body} onChange={(e) => setBody(e.target.value)} required />
+            <div className="flex items-center gap-2 text-xs">
+              <Button
+                type="button"
+                variant={isPosterMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIsPosterMode(true)}
+              >
+                Poster / Flier
+              </Button>
+              <Button
+                type="button"
+                variant={!isPosterMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setIsPosterMode(false)}
+              >
+                Normal text
+              </Button>
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="note-body">{isPosterMode ? "Caption (optional)" : "Ujumbe"}</Label>
+              <Textarea
+                id="note-body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                required={!isPosterMode}
+              />
+            </div>
+            {isPosterMode ? (
+              <div className="grid gap-2">
+                <Label htmlFor="poster-upload">Poster / Flier image</Label>
+                <Input
+                  id="poster-upload"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => onPosterPicked(e.target.files?.[0] ?? null)}
+                  required
+                />
+                {imageDataUrl ? (
+                  <Image
+                    src={imageDataUrl}
+                    alt="Poster preview"
+                    width={640}
+                    height={360}
+                    className="max-h-64 w-full rounded-md border object-contain"
+                    unoptimized
+                  />
+                ) : null}
+              </div>
+            ) : null}
             {canPostGlobal && canPostJumuiya ? (
               <div className="grid gap-2">
                 <Label>Aina ya taarifa</Label>
@@ -138,7 +201,7 @@ export function CongregationNotesCard({
             <p className="text-sm text-muted-foreground">Hakuna taarifa mpya.</p>
           ) : (
             notes.map((n) => (
-              <div key={n.id} className="rounded-md border p-3">
+              <div key={n.id} className="rounded-md border p-3 shadow-sm">
                 <div className="mb-1 flex items-start justify-between gap-2">
                   <p className="font-medium">{n.title}</p>
                   {canDeleteThisNote(n) ? (
@@ -154,7 +217,20 @@ export function CongregationNotesCard({
                     </Button>
                   ) : null}
                 </div>
-                <p className="text-sm whitespace-pre-wrap">{n.body}</p>
+                {n.image_url ? (
+                  <div className="space-y-2">
+                    <Image
+                      src={n.image_url}
+                      alt={n.title}
+                      width={1200}
+                      height={800}
+                      className="max-h-[28rem] w-full rounded-md border object-contain"
+                    />
+                    {n.body ? <p className="text-sm whitespace-pre-wrap">{n.body}</p> : null}
+                  </div>
+                ) : (
+                  <p className="text-sm whitespace-pre-wrap">{n.body}</p>
+                )}
                 <p className="mt-2 text-xs text-muted-foreground">
                   {n.scope_label} | {n.author_name || "Unknown"}
                 </p>

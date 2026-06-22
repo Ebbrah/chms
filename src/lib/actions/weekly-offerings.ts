@@ -598,7 +598,8 @@ export async function saveWeeklyCollectiveOffering(
     .eq("id", batch.batchId);
 
   revalidatePath("/dashboard/offerings");
-  return { ok: true };
+  revalidatePath(`/dashboard/offerings/batches/${batch.batchId}`);
+  return { ok: true, batchId: batch.batchId };
 }
 
 /**

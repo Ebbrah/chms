@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Loader2 } from "lucide-react";
 
 export function ForgotPasswordForm() {
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +57,15 @@ export function ForgotPasswordForm() {
         <Label htmlFor="email">Email</Label>
         <Input id="email" name="email" type="email" autoComplete="email" required />
       </div>
-      <Button type="submit" disabled={loading}>
-        {loading ? "Sending…" : "Send reset link"}
+      <Button type="submit" disabled={loading} aria-busy={loading}>
+        {loading ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Sending reset link...
+          </>
+        ) : (
+          "Send reset link"
+        )}
       </Button>
     </form>
   );

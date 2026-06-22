@@ -144,7 +144,7 @@ export default async function JumuiyaPage() {
                         {h.created_at ? new Date(h.created_at).toLocaleString() : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="link" asChild>
+                        <Button variant="outline" size="sm" asChild>
                           <Link href={`/dashboard/settings/jumuiya/${h.id}`}>Edit</Link>
                         </Button>
                       </TableCell>

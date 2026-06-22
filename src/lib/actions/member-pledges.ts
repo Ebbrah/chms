@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getMyRoles } from "@/lib/auth/session";
-import { canRecordMidWeekOfferings, canRecordWeeklyOfferings } from "@/lib/auth/permissions";
+import {
+  canEditPendingOfferings,
+  canRecordMidWeekOfferings,
+  canRecordWeeklyOfferings,
+} from "@/lib/auth/permissions";
 import { getOrCreateOfferingWeekBatchId } from "@/lib/actions/weekly-offerings";
 import { OFFERING_BATCH_SLOT_MIDWEEK } from "@/lib/offering/weekly";
 
@@ -217,4 +221,67 @@ export async function recordMemberOtherPledge(formData: FormData) {
   revalidatePath(`/dashboard/offerings/batches/${batchId}`);
   revalidatePath("/dashboard");
   return { ok: true, batchId };
+}
+
+export async function updateMemberOtherPledgeLine(input: {
+  pledgeId: string;
+  field: "amount" | "paid_amount";
+  amount: number;
+}) {
+  const roles = await getMyRoles();
+  if (!canEditPendingOfferings(roles)) {
+    return { error: "You cannot edit other pledges" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in" };
+
+  const { data: profile } = await supabase.from("profiles").select("org_id").eq("id", user.id).single();
+  const orgId = profile?.org_id;
+  if (!orgId) return { error: "No organization" };
+
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return { error: "Invalid amount" };
+  }
+
+  const { data: row, error } = await supabase
+    .from("member_other_pledges")
+    .select("id, org_id, batch_id, amount, paid_amount")
+    .eq("id", input.pledgeId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (error || !row) return { error: "Pledge not found" };
+  if (!row.batch_id) return { error: "Pledge is not attached to a weekly batch" };
+
+  const { data: batch, error: bErr } = await supabase
+    .from("offering_week_batches")
+    .select("id, status")
+    .eq("id", row.batch_id)
+    .eq("org_id", orgId)
+    .single();
+  if (bErr || !batch) return { error: "Batch not found" };
+  if (!["pending_authorization", "rejected"].includes(batch.status)) {
+    return { error: "This pledge can only be edited before authorization or after rejection" };
+  }
+
+  const nextAmount = input.field === "amount" ? amount : Number(row.amount);
+  const nextPaid = input.field === "paid_amount" ? amount : Number(row.paid_amount ?? 0);
+  if (nextPaid > nextAmount) {
+    return { error: "Paid amount cannot exceed pledge amount" };
+  }
+
+  const { error: upErr } = await supabase
+    .from("member_other_pledges")
+    .update(input.field === "amount" ? { amount: nextAmount } : { paid_amount: nextPaid })
+    .eq("id", row.id)
+    .eq("org_id", orgId);
+  if (upErr) return { error: upErr.message };
+
+  revalidatePath("/dashboard/offerings");
+  revalidatePath(`/dashboard/offerings/batches/${row.batch_id}`);
+  return { ok: true };
 }

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button-link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
@@ -132,9 +133,7 @@ export default async function OfferingReportsPage({
           <h1 className="text-2xl font-semibold tracking-tight">Offering reports</h1>
           <p className="text-sm font-medium text-foreground">{label}</p>
         </div>
-        <Link href="/dashboard/offerings" className="text-sm text-primary underline-offset-4 hover:underline">
-          Back to offerings
-        </Link>
+        <ButtonLink href="/dashboard/offerings">Back to offerings</ButtonLink>
       </div>
 
       <Suspense fallback={<div className="h-20 animate-pulse rounded-md bg-muted" />}>
@@ -202,16 +201,16 @@ export default async function OfferingReportsPage({
         </span>
         <div className="flex items-center gap-3">
           {safePage > 1 ? (
-            <Link href={pageHref(safePage - 1)} className="text-primary hover:underline">
+            <ButtonLink href={pageHref(safePage - 1)} variant="outline" size="sm">
               Previous
-            </Link>
+            </ButtonLink>
           ) : (
             <span className="opacity-50">Previous</span>
           )}
           {safePage < totalPages ? (
-            <Link href={pageHref(safePage + 1)} className="text-primary hover:underline">
+            <ButtonLink href={pageHref(safePage + 1)} variant="outline" size="sm">
               Next
-            </Link>
+            </ButtonLink>
           ) : (
             <span className="opacity-50">Next</span>
           )}

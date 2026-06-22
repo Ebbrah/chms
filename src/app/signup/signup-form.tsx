@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export function SignupForm() {
   const router = useRouter();
@@ -52,11 +52,12 @@ export function SignupForm() {
         },
       },
     });
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError(err.message);
       return;
     }
+    setLoading(false);
     form.reset();
     setSubmitted(true);
     setMessage("Check your email to confirm your account, then sign in from the login page.");
@@ -127,8 +128,17 @@ export function SignupForm() {
           </button>
         </div>
       </div>
-      <Button type="submit" disabled={loading || submitted}>
-        {loading ? "Creating…" : submitted ? "Account request sent" : "Create account"}
+      <Button type="submit" disabled={loading || submitted} aria-busy={loading}>
+        {loading ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Creating account...
+          </>
+        ) : submitted ? (
+          "Account request sent"
+        ) : (
+          "Create account"
+        )}
       </Button>
     </form>
   );

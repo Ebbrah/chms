@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export function LoginForm() {
   const router = useRouter();
@@ -33,8 +33,8 @@ export function LoginForm() {
       email,
       password,
     });
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError(err.message);
       return;
     }
@@ -89,8 +89,15 @@ export function LoginForm() {
           </Link>
         </div>
       </div>
-      <Button type="submit" disabled={loading}>
-        {loading ? "Signing in…" : "Sign in"}
+      <Button type="submit" disabled={loading} aria-busy={loading}>
+        {loading ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Signing in...
+          </>
+        ) : (
+          "Sign in"
+        )}
       </Button>
     </form>
   );
