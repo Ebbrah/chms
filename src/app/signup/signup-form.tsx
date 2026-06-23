@@ -9,7 +9,17 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 
-export function SignupForm() {
+type SignupFormProps = {
+  parishSlug?: string;
+  parishName?: string;
+  redirectPath?: string;
+};
+
+export function SignupForm({
+  parishSlug,
+  parishName,
+  redirectPath = "/login",
+}: SignupFormProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -19,6 +29,10 @@ export function SignupForm() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!parishSlug) {
+      setError("Registration requires a parish join link from your church.");
+      return;
+    }
     setError(null);
     setMessage(null);
     setSubmitted(false);
@@ -29,8 +43,7 @@ export function SignupForm() {
     )
       .trim()
       .toLowerCase();
-    const password = (form.elements.namedItem("password") as HTMLInputElement)
-      .value;
+    const password = (form.elements.namedItem("password") as HTMLInputElement).value;
     const fullName = (
       (form.elements.namedItem("fullName") as HTMLInputElement).value ?? ""
     ).trim();
@@ -38,7 +51,7 @@ export function SignupForm() {
     const offeringNumber =
       (form.elements.namedItem("offeringNumber") as HTMLInputElement)?.value ?? "";
     const redirectTo =
-      typeof window !== "undefined" ? `${window.location.origin}/login` : undefined;
+      typeof window !== "undefined" ? `${window.location.origin}${redirectPath}` : undefined;
     const supabase = createClient();
     const { error: err } = await supabase.auth.signUp({
       email,
@@ -49,6 +62,7 @@ export function SignupForm() {
           full_name: fullName,
           phone: phone.trim() || null,
           offering_number: offeringNumber.trim() || null,
+          parish_slug: parishSlug,
         },
       },
     });
@@ -60,7 +74,11 @@ export function SignupForm() {
     setLoading(false);
     form.reset();
     setSubmitted(true);
-    setMessage("Check your email to confirm your account, then sign in from the login page.");
+    setMessage(
+      parishName
+        ? `Check your email to confirm your ${parishName} account, then sign in.`
+        : "Check your email to confirm your account, then sign in.",
+    );
     router.refresh();
   }
 
@@ -84,13 +102,7 @@ export function SignupForm() {
       </div>
       <div className="grid gap-2">
         <Label htmlFor="offeringNumber">Namba ya Bahasha</Label>
-        <Input
-          id="offeringNumber"
-          name="offeringNumber"
-          autoComplete="off"
-          required={false}
-          aria-required={false}
-        />
+        <Input id="offeringNumber" name="offeringNumber" autoComplete="off" />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="phone">Namba ya Simu</Label>
@@ -98,13 +110,7 @@ export function SignupForm() {
       </div>
       <div className="grid gap-2">
         <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-        />
+        <Input id="email" name="email" type="email" autoComplete="email" required />
       </div>
       <div className="grid gap-2">
         <Label htmlFor="password">Password</Label>
@@ -128,7 +134,7 @@ export function SignupForm() {
           </button>
         </div>
       </div>
-      <Button type="submit" disabled={loading || submitted} aria-busy={loading}>
+      <Button type="submit" disabled={loading || submitted || !parishSlug} aria-busy={loading}>
         {loading ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />

@@ -11,7 +11,7 @@ export function RegionalShell({
 }) {
   const basePath = scope.type === "diocese" ? "/regional/diocese" : "/regional/district";
   const scopeLabel = scope.type === "diocese" ? "Dayosisi" : "Jimbo";
-  const brandLabel = scope.type === "diocese" ? "Diocese" : "District";
+  const brandLabel = scope.type === "diocese" ? "Dayosisi" : "Jimbo";
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">

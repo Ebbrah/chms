@@ -32,13 +32,12 @@ export async function updateSession(request: NextRequest) {
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] =
     null;
   try {
+    // Session from cookie is enough for route guards; avoids a network round-trip per navigation.
     const {
-      data: { user: currentUser },
-    } = await supabase.auth.getUser();
-    user = currentUser;
+      data: { session },
+    } = await supabase.auth.getSession();
+    user = session?.user ?? null;
   } catch {
-    // If auth cookies contain an expired/invalid refresh token, clear them so
-    // the app can continue as a signed-out user without repeated auth errors.
     request.cookies
       .getAll()
       .filter((cookie) => cookie.name.startsWith("sb-"))
@@ -53,20 +52,81 @@ export async function updateSession(request: NextRequest) {
     });
   }
 
-  if (request.nextUrl.pathname.startsWith("/dashboard") && !user) {
+  const path = request.nextUrl.pathname;
+  const needsAuth =
+    path.startsWith("/dashboard") ||
+    path.startsWith("/platform") ||
+    path.startsWith("/regional");
+
+  if (needsAuth && !user) {
     const redirect = NextResponse.redirect(new URL("/login", request.url));
     copyCookies(supabaseResponse, redirect);
     return redirect;
   }
 
   if (
-    (request.nextUrl.pathname === "/login" ||
-      request.nextUrl.pathname === "/signup") &&
+    (path === "/login" || path === "/signup") &&
     user
   ) {
     const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
     copyCookies(supabaseResponse, redirect);
     return redirect;
+  }
+
+  if ((path === "/join" || path.startsWith("/join/")) && user) {
+    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
+    copyCookies(supabaseResponse, redirect);
+    return redirect;
+  }
+
+  // Block parish users when their org is suspended (platform admin exempt).
+  if (user && path.startsWith("/dashboard") && !path.startsWith("/dashboard/suspended")) {
+    try {
+      const { data: platformAdmin } = await supabase
+        .from("platform_admins")
+        .select("user_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!platformAdmin?.user_id) {
+        let effectiveOrgId: string | null = null;
+
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("org_id, context_org_id")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!profileError && profile) {
+          effectiveOrgId = profile.context_org_id ?? profile.org_id ?? null;
+        } else {
+          const { data: fallbackProfile } = await supabase
+            .from("profiles")
+            .select("org_id")
+            .eq("id", user.id)
+            .maybeSingle();
+          effectiveOrgId = fallbackProfile?.org_id ?? null;
+        }
+
+        if (effectiveOrgId) {
+          const { data: org, error: orgError } = await supabase
+            .from("organizations")
+            .select("status")
+            .eq("id", effectiveOrgId)
+            .maybeSingle();
+
+          if (!orgError && org?.status === "suspended") {
+            const redirect = NextResponse.redirect(
+              new URL("/dashboard/suspended", request.url),
+            );
+            copyCookies(supabaseResponse, redirect);
+            return redirect;
+          }
+        }
+      }
+    } catch {
+      /* Allow request through if suspension check fails (e.g. schema lag). */
+    }
   }
 
   return supabaseResponse;

@@ -11,8 +11,8 @@ import {
 
 const links = [
   { href: "/platform", label: "Overview", exact: true },
-  { href: "/platform/dioceses", label: "Dioceses" },
-  { href: "/platform/districts", label: "Districts" },
+  { href: "/platform/dioceses", label: "Dayosisi" },
+  { href: "/platform/districts", label: "Jimbo" },
   { href: "/platform/parishes", label: "Parishes" },
   { href: "/platform/officers", label: "Officers" },
   { href: "/platform/transfers", label: "Transfers" },

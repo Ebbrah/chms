@@ -21,10 +21,13 @@ export default function LoginPage() {
             <LoginForm />
           </Suspense>
         </CardContent>
-        <CardFooter className="flex justify-center text-sm text-muted-foreground">
-          <Link href="/signup" className="underline underline-offset-4">
-            Create an account
-          </Link>
+        <CardFooter className="flex justify-center text-center text-sm text-muted-foreground">
+          <p>
+            New member?{" "}
+            <Link href="/join" className="underline underline-offset-4">
+              Create account
+            </Link>
+          </p>
         </CardFooter>
       </Card>
     </div>
