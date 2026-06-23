@@ -1,35 +1,22 @@
 import Link from "next/link";
-import { getSessionUser, getProfile } from "@/lib/auth/session";
-import { getCurrentParishBranding } from "@/lib/platform/parish-branding";
-import { canAccessPlatform } from "@/lib/auth/platform-guard";
-import { canAccessRegional } from "@/lib/auth/regional-guard";
+import type { ParishBranding } from "@/lib/platform/parish-branding";
 import { ThemeToggle } from "./theme-toggle";
 import { SignOutButton } from "./sign-out-button";
 
-export async function DashboardHeader() {
-  const user = await getSessionUser();
-  const profile = user ? await getProfile() : null;
-  const fullName = String(profile?.full_name ?? "").trim();
-  const fallbackName = String(user?.user_metadata?.full_name ?? "").trim();
-  const displayName = fullName || fallbackName || "Member";
+export type DashboardHeaderProps = {
+  displayName: string;
+  showPlatform: boolean;
+  showRegional: boolean;
+  parish: ParishBranding | null;
+};
 
-  let showPlatform = false;
-  let showRegional = false;
-  let parish: Awaited<ReturnType<typeof getCurrentParishBranding>> = null;
-
-  if (user) {
-    try {
-      [showPlatform, showRegional, parish] = await Promise.all([
-        canAccessPlatform(),
-        canAccessRegional(),
-        getCurrentParishBranding(),
-      ]);
-    } catch {
-      /* MT tables may lag behind app deploy — parish dashboard must still load. */
-      parish = await getCurrentParishBranding().catch(() => null);
-    }
-  }
-
+/** Sync server header — data is loaded in dashboard layout to avoid RSC boundary issues. */
+export function DashboardHeader({
+  displayName,
+  showPlatform,
+  showRegional,
+  parish,
+}: DashboardHeaderProps) {
   return (
     <header className="flex h-14 items-center justify-between border-b border-border px-4 md:px-6">
       <div className="flex min-w-0 items-center gap-3">
