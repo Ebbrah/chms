@@ -1,22 +1,40 @@
 import Link from "next/link";
-import type { ParishBranding } from "@/lib/platform/parish-branding";
+import { canAccessPlatform } from "@/lib/auth/platform-guard";
+import { getProfile, getSessionUser } from "@/lib/auth/session";
+import { getCurrentParishBranding } from "@/lib/platform/parish-branding";
 import { ThemeToggle } from "./theme-toggle";
 import { SignOutButton } from "./sign-out-button";
 
-export type DashboardHeaderProps = {
-  displayName: string;
-  showPlatform: boolean;
-  showRegional: boolean;
-  parish: ParishBranding | null;
-};
+/** Self-loading server header — avoids passing auth/branding props across RSC boundaries. */
+export async function DashboardHeader() {
+  let displayName = "Member";
+  let parish: Awaited<ReturnType<typeof getCurrentParishBranding>> = null;
+  let showPlatform = false;
 
-/** Sync server header — data is loaded in dashboard layout to avoid RSC boundary issues. */
-export function DashboardHeader({
-  displayName,
-  showPlatform,
-  showRegional,
-  parish,
-}: DashboardHeaderProps) {
+  try {
+    const user = await getSessionUser();
+    if (user) {
+      const profile = await getProfile();
+      const fullName = String(profile?.full_name ?? "").trim();
+      const fallbackName = String(user.user_metadata?.full_name ?? "").trim();
+      displayName = fullName || fallbackName || "Member";
+    }
+  } catch {
+    /* Welcome line can fall back to "Member". */
+  }
+
+  try {
+    parish = await getCurrentParishBranding();
+  } catch {
+    /* Logo / parish name are optional. */
+  }
+
+  try {
+    showPlatform = await canAccessPlatform();
+  } catch {
+    /* Platform link hidden when MT tables lag. */
+  }
+
   return (
     <header className="flex h-14 items-center justify-between border-b border-border px-4 md:px-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -39,14 +57,6 @@ export function DashboardHeader({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        {showRegional ? (
-          <Link
-            href="/regional"
-            className="text-xs font-medium text-primary hover:underline"
-          >
-            Dayosisi / Jimbo
-          </Link>
-        ) : null}
         {showPlatform ? (
           <Link
             href="/platform"

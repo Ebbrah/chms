@@ -32,11 +32,11 @@ export async function updateSession(request: NextRequest) {
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] =
     null;
   try {
-    // Session from cookie is enough for route guards; avoids a network round-trip per navigation.
+    // Validate JWT with Supabase so middleware and RSC layouts agree on auth state.
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    user = session?.user ?? null;
+      data: { user: currentUser },
+    } = await supabase.auth.getUser();
+    user = currentUser;
   } catch {
     request.cookies
       .getAll()
@@ -55,8 +55,7 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const needsAuth =
     path.startsWith("/dashboard") ||
-    path.startsWith("/platform") ||
-    path.startsWith("/regional");
+    path.startsWith("/platform");
 
   if (needsAuth && !user) {
     const redirect = NextResponse.redirect(new URL("/login", request.url));

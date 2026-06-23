@@ -14,7 +14,6 @@ const links = [
   { href: "/platform/dioceses", label: "Dayosisi" },
   { href: "/platform/districts", label: "Jimbo" },
   { href: "/platform/parishes", label: "Parishes" },
-  { href: "/platform/officers", label: "Officers" },
   { href: "/platform/transfers", label: "Transfers" },
 ];
 

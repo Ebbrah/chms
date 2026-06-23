@@ -29,32 +29,45 @@ export const getSessionUser = cache(async () => {
   }
 });
 
+/** Mirrors SQL `current_org_id()` — context org only for platform admin / operators. */
 export const getMyOrgId = cache(async (): Promise<string | null> => {
-  const supabase = await createClient();
-  const user = await getSessionUser();
-  if (!user) return null;
+  try {
+    const supabase = await createClient();
+    const user = await getSessionUser();
+    if (!user) return null;
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("org_id, context_org_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!error && data) {
-    return data.context_org_id ?? data.org_id ?? null;
-  }
-
-  // MT-2 column may not exist yet on production — fall back to org_id only.
-  if (isMissingSchemaError(error)) {
-    const { data: fallback } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
-      .select("org_id")
+      .select("org_id, context_org_id")
       .eq("id", user.id)
       .maybeSingle();
-    return fallback?.org_id ?? null;
-  }
 
-  return data?.org_id ?? null;
+    if (error && isMissingSchemaError(error)) {
+      const { data: fallback } = await supabase
+        .from("profiles")
+        .select("org_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      return fallback?.org_id ?? null;
+    }
+
+    if (!data) return null;
+
+    const contextOrgId = data.context_org_id ?? null;
+    if (contextOrgId) {
+      const [admin, operatorOrgIds] = await Promise.all([
+        isPlatformAdmin(),
+        getPlatformParishOperatorOrgIds(),
+      ]);
+      if (admin || operatorOrgIds.includes(contextOrgId)) {
+        return contextOrgId;
+      }
+    }
+
+    return data.org_id ?? null;
+  } catch {
+    return null;
+  }
 });
 
 function parseRoles(rows: { role: string }[] | null | undefined): AppRole[] {
@@ -67,28 +80,32 @@ function parseRoles(rows: { role: string }[] | null | undefined): AppRole[] {
 }
 
 export const getMyRoles = cache(async (): Promise<AppRole[]> => {
-  const supabase = await createClient();
-  const user = await getSessionUser();
-  if (!user) return [];
+  try {
+    const supabase = await createClient();
+    const user = await getSessionUser();
+    if (!user) return [];
 
-  const orgId = await getMyOrgId();
+    const orgId = await getMyOrgId();
 
-  if (orgId) {
-    const { data } = await supabase
+    if (orgId) {
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("org_id", orgId);
+      const scoped = parseRoles(data);
+      if (scoped.length > 0) return scoped;
+    }
+
+    // Pre-MT / schema-lag safety: keep Ebenezer nav working if org-scoped read is empty.
+    const { data: fallback } = await supabase
       .from("user_roles")
       .select("role")
-      .eq("user_id", user.id)
-      .eq("org_id", orgId);
-    const scoped = parseRoles(data);
-    if (scoped.length > 0) return scoped;
+      .eq("user_id", user.id);
+    return parseRoles(fallback);
+  } catch {
+    return [];
   }
-
-  // Pre-MT / schema-lag safety: keep Ebenezer nav working if org-scoped read is empty.
-  const { data: fallback } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id);
-  return parseRoles(fallback);
 });
 
 /** True when the signed-in user is in platform_admins (MT-1+). */
@@ -127,13 +144,17 @@ export const getPlatformParishOperatorOrgIds = cache(async (): Promise<string[]>
 });
 
 export const getProfile = cache(async () => {
-  const supabase = await createClient();
-  const user = await getSessionUser();
-  if (!user) return null;
-  const { data } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-  return data;
+  try {
+    const supabase = await createClient();
+    const user = await getSessionUser();
+    if (!user) return null;
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+    return data;
+  } catch {
+    return null;
+  }
 });

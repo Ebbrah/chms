@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppRole } from "@/lib/auth/roles";
 import {
@@ -17,10 +16,6 @@ import {
   hasRole,
 } from "@/lib/auth/permissions";
 import { getChurchTimeZone } from "@/lib/offering/church-calendar";
-import {
-  NavigationProgressProvider,
-  useNavProgress,
-} from "@/components/layout/navigation-progress";
 
 const links: {
   href: string;
@@ -158,42 +153,6 @@ function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function NavLink({
-  href,
-  label,
-  horizontal,
-  active,
-}: {
-  href: string;
-  label: string;
-  horizontal?: boolean;
-  active: boolean;
-}) {
-  const { startNavigation, pendingHref } = useNavProgress();
-  const pending = pendingHref === href;
-
-  return (
-    <Link
-      href={href}
-      prefetch={true}
-      aria-current={active ? "page" : undefined}
-      aria-busy={pending}
-      onClick={() => startNavigation(href)}
-      className={cn(
-        "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-        horizontal && "shrink-0 whitespace-nowrap",
-        active && "bg-accent text-accent-foreground",
-        pending && "opacity-80",
-      )}
-    >
-      {pending ? (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" aria-hidden />
-      ) : null}
-      <span>{label}</span>
-    </Link>
-  );
-}
-
 export function DashboardNav({
   roles,
   horizontal,
@@ -209,25 +168,27 @@ export function DashboardNav({
     }).format(new Date()) === "Sunday";
 
   return (
-    <NavigationProgressProvider>
-      <nav
-        className={cn(
-          "flex gap-1 p-2",
-          horizontal ? "flex-row flex-nowrap" : "flex-col",
-        )}
-      >
-        {links
-          .filter((l) => l.visible(roles, isSundayInChurchTz))
-          .map((l) => (
-            <NavLink
-              key={l.href}
-              href={l.href}
-              label={l.label}
-              horizontal={horizontal}
-              active={isActivePath(pathname, l.href)}
-            />
-          ))}
-      </nav>
-    </NavigationProgressProvider>
+    <nav
+      className={cn(
+        "flex gap-1 p-2",
+        horizontal ? "flex-row flex-nowrap" : "flex-col",
+      )}
+    >
+      {links
+        .filter((l) => l.visible(roles, isSundayInChurchTz))
+        .map((l) => (
+          <Link
+            key={l.href}
+            href={l.href}
+            className={cn(
+              "rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+              horizontal && "shrink-0 whitespace-nowrap",
+              isActivePath(pathname, l.href) && "bg-accent text-accent-foreground",
+            )}
+          >
+            {l.label}
+          </Link>
+        ))}
+    </nav>
   );
 }

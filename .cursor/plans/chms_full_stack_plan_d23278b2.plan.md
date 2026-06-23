@@ -1,6 +1,6 @@
 ---
 name: ChMS Full Stack Plan
-overview: A phased roadmap for the Church Management System (ChMS) on Next.js 15 (App Router), TypeScript, Tailwind, shadcn/ui, and Supabase—members, offerings (week batches, committee authorization, treasurer approval), extended RBAC (Mzee wa kanisa, committee heads, jumuiya chairs), finance, reporting, exports, SMS, PWA, dark mode, church-local time (`CHURCH_TIMEZONE`), and Vercel deployment. Implementation in-repo has progressed beyond the original scope; this plan records both the baseline architecture and the extensions shipped in ChMS.
+overview: A phased roadmap for the Church Management System (ChMS) on Next.js 15 (App Router), TypeScript, Tailwind, shadcn/ui, and Supabase—members, offerings (week batches, committee authorization, treasurer approval), extended RBAC (Mzee wa kanisa, committee heads, jumuiya chairs), finance, reporting, exports, SMS, PWA, dark mode, per-parish timezone, and Vercel deployment. Phases 0–12 are complete for the first live parish; Phases MT-1–MT-4 (multi-parish platform, diocese/district governance) are documented in chms_multi_parish_platform.plan.md.
 todos:
   - id: phase-0
     content: Scaffold Next.js 15, Tailwind, shadcn/ui, Supabase clients, middleware, dark mode, env template
@@ -26,6 +26,9 @@ todos:
   - id: phase-11-12
     content: PWA manifest/icons/service worker, Vercel deploy, RLS audit, monitoring
     status: completed
+  - id: phase-mt-roadmap
+    content: "Phases MT-1–MT-4: Multi-parish platform — see chms_multi_parish_platform.plan.md (MT-1 foundation complete)"
+    status: in_progress
 isProject: false
 ---
 
@@ -33,10 +36,10 @@ isProject: false
 
 ## Assumptions (adjust if your context differs)
 
-- **Single congregation** per deployment (one logical “church”). Schema includes an optional `organizations` row so you can grow to multi-site later without a rewrite.
-- **SMS** via a provider-agnostic integration (e.g. Twilio or regional gateway); secrets live in Vercel env vars.
-- **Accounting**: general ledger uses **double-entry** (debits/credits); cashbook is an operational register that **creates or links to** ledger postings for consistency.
-- **Church calendar / Sunday** for role-specific behaviour (e.g. Mzee wa kanisa recording windows) uses **`CHURCH_TIMEZONE`** (IANA, default `Africa/Nairobi`) in server-rendered offerings logic so hosted UTC does not disagree with the congregation’s local Sunday.
+- **Multi-parish platform (phased rollout).** Phases 0–12 delivered a single live parish on shared infrastructure (`organizations` + `org_id` + RLS). **Phases MT-1–MT-4** (documented in [`chms_multi_parish_platform.plan.md`](chms_multi_parish_platform.plan.md)) extend the same app and database to many parishes with platform, diocese, and district governance—without migrating or disturbing the existing production parish.
+- **SMS** via a provider-agnostic integration (e.g. Twilio or regional gateway); secrets live in Vercel env vars (global provider keys); per-parish enablement via org feature flags.
+- **Accounting**: general ledger uses **double-entry** (debits/credits); cashbook is an operational register that **creates or links to** ledger postings for consistency. Parish finance data stays isolated; diocese/district treasurers see **aggregate totals only** within their scope.
+- **Church calendar / Sunday** for role-specific behaviour (e.g. Mzee wa kanisa recording windows) uses per-parish **`timezone`** on `organizations` (replacing a single global `CHURCH_TIMEZONE` over time) so each parish’s local Sunday is correct.
 
 ---
 
@@ -161,7 +164,7 @@ Supporting root files: `next.config.ts` (PWA plugin or manual SW), `tailwind.con
 
 **Core identity & roles**
 
-- `organizations` — id, name, settings (JSON), created_at (optional multi-tenant anchor).
+- `organizations` — id, name, settings (JSON), created_at; **extended in MT phases** with `district_id`, parish slug, logo, timezone, fiscal metadata, and per-parish feature flags. See multi-parish plan for `dioceses`, `districts`, and regional officer tables.
 - `profiles` — id (FK `auth.users`), org_id, full_name, phone, avatar_url, preferences (JSON, includes theme if stored server-side).
 - `app_role` — enum includes at least: `admin`, `treasurer`, `pastor`, `assistant_pastor`, `member`, `committee_head`, `church_elder`, `jumuiya_chairman` (extend via migrations as needed).
 - `user_roles` — user_id, role, org_id; users can hold multiple roles per org.
@@ -347,6 +350,32 @@ Scaffold Phase 0 (Next.js + Supabase + shadcn), apply initial migration for `pro
 
 ---
 
+## Phase 13+ — Multi-parish platform (active roadmap)
+
+Phases 0–12 are **complete** for the first live parish. The next major initiative is **not** a rewrite—it extends the existing tenant model.
+
+| Phase | Focus | Primary deliverables |
+|-------|--------|----------------------|
+| **MT-1** | Foundation | Diocese/district hierarchy, platform admin, `provision_parish()`, feature flags, role scoping fixes, one-email-one-parish rule |
+| **MT-2** | Platform & parish lifecycle | Platform dashboard, parish CRUD + logo, per-parish feature toggles, platform roll-up totals, parish-operator multi-parish access (platform team) |
+| **MT-3** | Parish access & signup | `/join/{slug}` signup links, disable default-org open signup, pastor transfer workflow, parish name/logo in header |
+| **MT-4** | Diocese & district governance | Diocese/district officer roles, scoped demographic & financial roll-up reports, cross-parish **registry search** (name → parish + active status) |
+
+**Full specification:** [`chms_multi_parish_platform.plan.md`](chms_multi_parish_platform.plan.md)
+
+**Governance layers (top → bottom):**
+
+```text
+Platform Admin (you)
+  └── Diocese officers (Bishop, General Secretary, Treasurer, Diocese committee heads)
+        └── District officers (Mkuu wa Jimbo, District Secretary, Treasurer, District committee heads)
+              └── Parish (existing admin, treasurer, pastor, elders, members…)
+```
+
+Regional officers see **aggregates and limited registry lookup** within their diocese or district—not other parishes’ operational screens unless explicitly granted (platform team only).
+
+---
+
 ## ChMS implementation status (snapshot)
 
-The codebase has completed Phases 0–12 at a functional level, with Tanzania-oriented UX (TZS, Swahili copy), offering batch workflow, and extended RBAC. Recent extensions include: assistant pastor role support, dual-elder display per jumuiya on member dashboard, and other-pledges support for unregistered congregants (plus paid/balance fields). Ongoing work is iterative: RLS reviews when adding tables, new env vars (`CHURCH_TIMEZONE`), and `supabase db push` whenever new migrations land (including elder org-wide read for offerings: `20260421120000_members_profiles_select_church_elder_offerings.sql` and role/pledge extensions from 2026-04-20).
+The codebase has completed Phases 0–12 at a functional level, with Tanzania-oriented UX (TZS, Swahili copy), offering batch workflow, and extended RBAC. Recent extensions include: assistant pastor role support, dual-elder display per jumuiya on member dashboard, other-pledges support for unregistered congregants, profile photos, congregation note media, and offerings UI improvements. **Next:** MT-1 through MT-4 per the multi-parish platform plan. Ongoing discipline: RLS reviews when adding tables, per-parish timezone in org settings, and `supabase db push` whenever new migrations land.

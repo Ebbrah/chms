@@ -20,38 +20,42 @@ function isMissingColumnError(error: { code?: string; message?: string } | null)
 
 /** Load display name and logo for the user's effective parish. */
 export const getCurrentParishBranding = cache(async (): Promise<ParishBranding | null> => {
-  const supabase = await createClient();
-  const orgId = await getMyOrgId();
-  if (!orgId) return null;
+  try {
+    const supabase = await createClient();
+    const orgId = await getMyOrgId();
+    if (!orgId) return null;
 
-  const { data: org, error } = await supabase
-    .from("organizations")
-    .select("display_name, name, logo_url, slug")
-    .eq("id", orgId)
-    .maybeSingle();
-
-  if (!error && org) {
-    return {
-      displayName: String(org.display_name ?? org.name ?? "Ebenezer"),
-      logoUrl: org.logo_url ?? null,
-      slug: org.slug ?? null,
-    };
-  }
-
-  // MT-1 columns may not exist yet — use legacy name column only.
-  if (isMissingColumnError(error)) {
-    const { data: basic } = await supabase
+    const { data: org, error } = await supabase
       .from("organizations")
-      .select("name")
+      .select("display_name, name, logo_url, slug")
       .eq("id", orgId)
       .maybeSingle();
-    if (!basic) return null;
-    return {
-      displayName: String(basic.name ?? "Ebenezer"),
-      logoUrl: null,
-      slug: null,
-    };
-  }
 
-  return null;
+    if (!error && org) {
+      return {
+        displayName: String(org.display_name ?? org.name ?? "Ebenezer"),
+        logoUrl: org.logo_url ?? null,
+        slug: org.slug ?? null,
+      };
+    }
+
+    // MT-1 columns may not exist yet — use legacy name column only.
+    if (isMissingColumnError(error)) {
+      const { data: basic } = await supabase
+        .from("organizations")
+        .select("name")
+        .eq("id", orgId)
+        .maybeSingle();
+      if (!basic) return null;
+      return {
+        displayName: String(basic.name ?? "Ebenezer"),
+        logoUrl: null,
+        slug: null,
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 });
