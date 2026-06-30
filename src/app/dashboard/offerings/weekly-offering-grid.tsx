@@ -13,7 +13,7 @@ import {
   WEEKLY_OFFERING_ROW_LIMIT,
 } from "@/lib/offering/weekly";
 import { parseAmountInput } from "@/lib/format/currency-input";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,6 +91,7 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
   }
 
   async function onSave() {
+    if (pending) return;
     setMsg(null);
     setErr(null);
     setPending(true);
@@ -329,9 +330,15 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
       </div>
 
       <div className="flex justify-end border-t pt-4">
-        <Button type="button" size="lg" onClick={() => void onSave()} disabled={pending}>
-          {pending ? "Saving…" : "Save / Hifadhi"}
-        </Button>
+        <ActionButton
+          type="button"
+          size="lg"
+          onClick={() => void onSave()}
+          loading={pending}
+          loadingText="Saving…"
+        >
+          Save / Hifadhi
+        </ActionButton>
       </div>
     </div>
   );

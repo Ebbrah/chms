@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { authorizeOfferingWeekBatch } from "@/lib/actions/weekly-offerings";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 
 export function AuthorizeBatchButton({ batchId }: { batchId: string }) {
   const router = useRouter();
@@ -11,6 +11,7 @@ export function AuthorizeBatchButton({ batchId }: { batchId: string }) {
   const [pending, setPending] = useState(false);
 
   async function onAuthorize() {
+    if (pending) return;
     setMsg(null);
     setPending(true);
     try {
@@ -27,9 +28,16 @@ export function AuthorizeBatchButton({ batchId }: { batchId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button type="button" size="sm" variant="secondary" disabled={pending} onClick={() => void onAuthorize()}>
-        {pending ? "…" : "Authorize"}
-      </Button>
+      <ActionButton
+        type="button"
+        size="sm"
+        variant="secondary"
+        loading={pending}
+        loadingText="Authorizing…"
+        onClick={() => void onAuthorize()}
+      >
+        Authorize
+      </ActionButton>
       {msg ? <span className="text-xs text-destructive">{msg}</span> : null}
     </div>
   );

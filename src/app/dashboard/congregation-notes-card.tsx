@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createCongregationNote, deleteCongregationNote } from "@/lib/actions/congregation-notes";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type NoteRow = {
@@ -50,44 +51,82 @@ export function CongregationNotesCard({
   canModerateNotes: boolean;
 }) {
   const router = useRouter();
+  const posterInputRef = useRef<HTMLInputElement>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgIsError, setMsgIsError] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [imageDataUrl, setImageDataUrl] = useState("");
+  const [posterLoading, setPosterLoading] = useState(false);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [isPosterMode, setIsPosterMode] = useState(false);
   const [scope, setScope] = useState(canPostGlobal ? "global" : "jumuiya");
 
+  function resetForm() {
+    setTitle("");
+    setBody("");
+    setImageDataUrl("");
+    setIsPosterMode(false);
+    setFileInputKey((k) => k + 1);
+    if (posterInputRef.current) posterInputRef.current.value = "";
+  }
+
   function onPosterPicked(file: File | null) {
-    if (!file) return;
+    if (!file) {
+      setImageDataUrl("");
+      return;
+    }
+    setPosterLoading(true);
+    setMsg(null);
     const reader = new FileReader();
     reader.onload = () => {
       setImageDataUrl(typeof reader.result === "string" ? reader.result : "");
+      setPosterLoading(false);
+    };
+    reader.onerror = () => {
+      setPosterLoading(false);
+      setMsgIsError(true);
+      setMsg("Could not read the selected image. Try a smaller file.");
     };
     reader.readAsDataURL(file);
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting || posterLoading) return;
+
     setMsg(null);
-    const fd = new FormData();
-    fd.set("title", title);
-    fd.set("body", body);
-    fd.set("scope", scope);
-    if (imageDataUrl.startsWith("data:image/")) {
-      fd.set("image_data_url", imageDataUrl);
-    }
-    const res = await createCongregationNote(fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
+    setMsgIsError(false);
+
+    if (isPosterMode && !imageDataUrl.startsWith("data:image/")) {
+      setMsgIsError(true);
+      setMsg("Chagua picha ya poster / flier kwanza.");
       return;
     }
-    setTitle("");
-    setBody("");
-    setImageDataUrl("");
-    setIsPosterMode(false);
-    setMsg("Taarifa imehifadhiwa.");
-    router.refresh();
+
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.set("title", title);
+      fd.set("body", body);
+      fd.set("scope", scope);
+      if (imageDataUrl.startsWith("data:image/")) {
+        fd.set("image_data_url", imageDataUrl);
+      }
+      const res = await createCongregationNote(fd);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      resetForm();
+      setMsg("Taarifa imehifadhiwa.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function canDeleteThisNote(n: NoteRow): boolean {
@@ -98,15 +137,22 @@ export function CongregationNotesCard({
   async function onDelete(noteId: string) {
     if (!confirm("Futa taarifa hii?")) return;
     setMsg(null);
+    setMsgIsError(false);
     setDeletingId(noteId);
-    const res = await deleteCongregationNote(noteId);
-    setDeletingId(null);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+    try {
+      const res = await deleteCongregationNote(noteId);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      router.refresh();
+    } finally {
+      setDeletingId(null);
     }
-    router.refresh();
   }
+
+  const canSubmitPoster = !isPosterMode || (imageDataUrl.startsWith("data:image/") && !posterLoading);
 
   return (
     <Card>
@@ -116,17 +162,30 @@ export function CongregationNotesCard({
       <CardContent className="space-y-4">
         {canPostGlobal || canPostJumuiya ? (
           <form onSubmit={(e) => void onSubmit(e)} className="grid gap-3 rounded-md border p-3">
-            {msg ? <p className="text-xs text-muted-foreground">{msg}</p> : null}
+            {msg ? (
+              <p className={`text-xs ${msgIsError ? "text-destructive" : "text-muted-foreground"}`}>{msg}</p>
+            ) : null}
             <div className="grid gap-2">
               <Label htmlFor="note-title">Kichwa</Label>
-              <Input id="note-title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+              <Input
+                id="note-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                required
+                disabled={submitting}
+              />
             </div>
             <div className="flex items-center gap-2 text-xs">
               <Button
                 type="button"
                 variant={isPosterMode ? "default" : "outline"}
                 size="sm"
-                onClick={() => setIsPosterMode(true)}
+                disabled={submitting}
+                onClick={() => {
+                  setIsPosterMode(true);
+                  setImageDataUrl("");
+                  setFileInputKey((k) => k + 1);
+                }}
               >
                 Poster / Flier
               </Button>
@@ -134,7 +193,12 @@ export function CongregationNotesCard({
                 type="button"
                 variant={!isPosterMode ? "default" : "outline"}
                 size="sm"
-                onClick={() => setIsPosterMode(false)}
+                disabled={submitting}
+                onClick={() => {
+                  setIsPosterMode(false);
+                  setImageDataUrl("");
+                  setPosterLoading(false);
+                }}
               >
                 Normal text
               </Button>
@@ -146,18 +210,24 @@ export function CongregationNotesCard({
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 required={!isPosterMode}
+                disabled={submitting}
               />
             </div>
             {isPosterMode ? (
               <div className="grid gap-2">
                 <Label htmlFor="poster-upload">Poster / Flier image</Label>
                 <Input
+                  key={fileInputKey}
+                  ref={posterInputRef}
                   id="poster-upload"
                   type="file"
                   accept="image/*"
+                  disabled={submitting || posterLoading}
                   onChange={(e) => onPosterPicked(e.target.files?.[0] ?? null)}
-                  required
                 />
+                {posterLoading ? (
+                  <p className="text-xs text-muted-foreground">Inapakia picha…</p>
+                ) : null}
                 {imageDataUrl ? (
                   <Image
                     src={imageDataUrl}
@@ -173,7 +243,7 @@ export function CongregationNotesCard({
             {canPostGlobal && canPostJumuiya ? (
               <div className="grid gap-2">
                 <Label>Aina ya taarifa</Label>
-                <Select value={scope} onValueChange={setScope}>
+                <Select value={scope} onValueChange={setScope} disabled={submitting}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -191,7 +261,13 @@ export function CongregationNotesCard({
               </Badge>
             </div>
             <div>
-              <Button type="submit">Tuma taarifa</Button>
+              <SubmitButton
+                loading={submitting}
+                loadingText="Inatumwa…"
+                disabled={!canSubmitPoster}
+              >
+                Tuma taarifa
+              </SubmitButton>
             </div>
           </form>
         ) : null}
@@ -213,7 +289,7 @@ export function CongregationNotesCard({
                       disabled={deletingId === n.id}
                       onClick={() => void onDelete(n.id)}
                     >
-                      {deletingId === n.id ? "…" : "Delete"}
+                      {deletingId === n.id ? "Inafuta…" : "Delete"}
                     </Button>
                   ) : null}
                 </div>

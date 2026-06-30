@@ -41,7 +41,7 @@ export default async function JoinParishPage({
               className="mx-auto mb-3 h-16 w-16 rounded-lg border object-cover"
             />
           ) : null}
-          <CardTitle>Join {parishName}</CardTitle>
+          <CardTitle>Jiunge na {parishName}</CardTitle>
           <p className="text-sm text-muted-foreground">
             Create your member account for this parish.
           </p>

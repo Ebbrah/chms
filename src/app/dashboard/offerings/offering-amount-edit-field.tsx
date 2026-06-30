@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateOfferingLine } from "@/lib/actions/weekly-offerings";
 import { CurrencyInput } from "@/components/ui/currency-input";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { formatAmountTZS } from "@/lib/format/amount";
 import { parseAmountInput } from "@/lib/format/currency-input";
@@ -28,18 +29,21 @@ export function OfferingAmountEditField({
   }, [amount, editing]);
 
   async function onSave() {
-    if (!offeringId) return;
+    if (!offeringId || pending) return;
     setPending(true);
     setMsg(null);
     try {
+      const parsed = parseAmountInput(value);
       const res = await updateOfferingLine({
         offeringId,
-        amount: parseAmountInput(value),
+        amount: parsed,
       });
       if ("error" in res && res.error) {
         setMsg(res.error);
         return;
       }
+      setEditing(false);
+      setMsg("Saved");
       router.refresh();
     } finally {
       setPending(false);
@@ -53,25 +57,28 @@ export function OfferingAmountEditField({
   return (
     <div className="group flex flex-col items-end gap-1">
       {editing ? (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1">
           <CurrencyInput
             className="h-8 w-28"
             value={value}
             onValueChange={setValue}
             emptyZero
+            disabled={pending}
           />
-          <Button
+          <ActionButton
             type="button"
             size="sm"
             onClick={() => void onSave()}
-            disabled={pending}
+            loading={pending}
+            loadingText="Saving…"
           >
             Save
-          </Button>
+          </ActionButton>
           <Button
             type="button"
             size="sm"
             variant="outline"
+            disabled={pending}
             onClick={() => {
               setEditing(false);
               setValue(amount > 0 ? String(amount) : "");
@@ -88,17 +95,22 @@ export function OfferingAmountEditField({
             type="button"
             size="sm"
             variant="outline"
-            className="opacity-0 transition-opacity group-hover:opacity-100"
+            className="opacity-100 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100"
             onClick={() => {
               setEditing(true);
               setValue(amount > 0 ? String(amount) : "");
+              setMsg(null);
             }}
           >
             Edit
           </Button>
         </div>
       )}
-      {msg ? <span className="text-xs text-destructive">{msg}</span> : null}
+      {msg ? (
+        <span className={`text-xs ${msg === "Saved" ? "text-muted-foreground" : "text-destructive"}`}>
+          {msg}
+        </span>
+      ) : null}
     </div>
   );
 }

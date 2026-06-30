@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createOffering } from "@/lib/actions/offerings";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { parseAmountInput } from "@/lib/format/currency-input";
@@ -28,6 +29,7 @@ export function OfferingForm({
 }) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [typeId, setTypeId] = useState<string>("");
   const [memberId, setMemberId] = useState<string>("__none__");
   const [amount, setAmount] = useState("");
@@ -38,30 +40,34 @@ export function OfferingForm({
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
     const a = parseAmountInput(amount);
     if (!Number.isFinite(a) || a <= 0) {
       setMsg("Enter a valid amount greater than zero.");
       return;
     }
-    // React may null out synthetic event fields after an await.
-    // Capture the form element synchronously to safely reset later.
     const form = e.currentTarget;
     const fd = new FormData(form);
     fd.set("offering_type_id", typeId);
     fd.set("member_id", memberId === "__none__" ? "" : memberId);
     fd.set("amount", String(a));
-    const res = await createOffering(fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+    setSubmitting(true);
+    try {
+      const res = await createOffering(fd);
+      if ("error" in res && res.error) {
+        setMsg(res.error);
+        return;
+      }
+      form.reset();
+      setAmount("");
+      setMemberId("__none__");
+      if (types[0]) setTypeId(types[0].id);
+      setMsg("Offering recorded.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    form.reset();
-    setAmount("");
-    setMemberId("__none__");
-    if (types[0]) setTypeId(types[0].id);
-    setMsg("Offering recorded.");
-    router.refresh();
   }
 
   if (!types.length) {
@@ -147,7 +153,9 @@ export function OfferingForm({
             <Input id="notes" name="notes" />
           </div>
           <div className="sm:col-span-2">
-            <Button type="submit">Save offering</Button>
+            <SubmitButton loading={submitting} loadingText="Saving…">
+              Save offering
+            </SubmitButton>
           </div>
         </form>
       </CardContent>

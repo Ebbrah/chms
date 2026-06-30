@@ -10,7 +10,7 @@ export default async function JoinPickerPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Jisajili akaunti</CardTitle>
+          <CardTitle>Jisajili Katika Mfumo wa Usharika</CardTitle>
           <p className="text-sm text-muted-foreground">
             Chagua dayosisi, jimbo, na usharika wako ili kuendelea na usajili.
           </p>
@@ -27,7 +27,7 @@ export default async function JoinPickerPage() {
         </CardContent>
         <CardFooter className="flex justify-center text-sm text-muted-foreground">
           <Link href="/login" className="underline underline-offset-4">
-            Tayari una akaunti? Ingia
+            Tayari una akaunti? Ingia (Login)
           </Link>
         </CardFooter>
       </Card>

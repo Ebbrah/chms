@@ -10,7 +10,7 @@ import {
   OFFERING_BATCH_SLOT_SECOND_SERVICE,
   offeringBatchSlotLabel,
 } from "@/lib/offering/weekly";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { parseAmountInput } from "@/lib/format/currency-input";
@@ -38,6 +38,7 @@ export function WeeklyCollectiveOfferingForm({
   const [pending, setPending] = useState(false);
 
   async function onSave() {
+    if (pending) return;
     setMsg(null);
     setErr(null);
     setPending(true);
@@ -130,13 +131,15 @@ export function WeeklyCollectiveOfferingForm({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button
+        <ActionButton
           type="button"
           onClick={() => void onSave()}
-          disabled={pending || !offeringTypeId || offeringTypes.length === 0}
+          loading={pending}
+          loadingText="Saving…"
+          disabled={!offeringTypeId || offeringTypes.length === 0}
         >
-          {pending ? "Saving…" : "Save / Hifadhi"}
-        </Button>
+          Save / Hifadhi
+        </ActionButton>
       </div>
 
       {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}

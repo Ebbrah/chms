@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { approveOfferingWeekBatch } from "@/lib/actions/weekly-offerings";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 
 export function ApproveBatchButton({ batchId }: { batchId: string }) {
   const router = useRouter();
@@ -11,6 +11,7 @@ export function ApproveBatchButton({ batchId }: { batchId: string }) {
   const [pending, setPending] = useState(false);
 
   async function onApprove() {
+    if (pending) return;
     setMsg(null);
     setPending(true);
     try {
@@ -30,9 +31,16 @@ export function ApproveBatchButton({ batchId }: { batchId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button type="button" size="sm" variant="default" disabled={pending} onClick={() => void onApprove()}>
-        {pending ? "…" : "Approve"}
-      </Button>
+      <ActionButton
+        type="button"
+        size="sm"
+        variant="default"
+        loading={pending}
+        loadingText="Approving…"
+        onClick={() => void onApprove()}
+      >
+        Approve
+      </ActionButton>
       {msg ? <span className="text-xs text-destructive">{msg}</span> : null}
     </div>
   );

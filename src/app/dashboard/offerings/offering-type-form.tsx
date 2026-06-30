@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createOfferingType } from "@/lib/actions/offerings";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,19 +13,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export function OfferingTypeForm() {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
-    const fd = new FormData(e.currentTarget);
-    const res = await createOfferingType(fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmitting(true);
+    try {
+      const res = await createOfferingType(fd);
+      if ("error" in res && res.error) {
+        setMsg(res.error);
+        return;
+      }
+      form.reset();
+      setMsg("Type added.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    e.currentTarget.reset();
-    setMsg("Type added.");
-    router.refresh();
   }
 
   return (
@@ -39,7 +48,9 @@ export function OfferingTypeForm() {
             <Label htmlFor="ot-name">Name</Label>
             <Input id="ot-name" name="name" required />
           </div>
-          <Button type="submit">Add type</Button>
+          <SubmitButton loading={submitting} loadingText="Adding…">
+            Add type
+          </SubmitButton>
           <Button type="button" variant="outline" asChild>
             <Link href="/dashboard/offerings/types">View</Link>
           </Button>

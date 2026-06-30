@@ -1,22 +1,37 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 
 export function SignOutButton() {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
 
   async function signOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      router.push("/login");
+      router.refresh();
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <Button type="button" variant="outline" size="sm" onClick={() => void signOut()}>
+    <ActionButton
+      type="button"
+      variant="outline"
+      size="sm"
+      loading={loading}
+      loadingText="Signing out…"
+      onClick={() => void signOut()}
+    >
       Sign out
-    </Button>
+    </ActionButton>
   );
 }

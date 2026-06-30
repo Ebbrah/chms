@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createMember } from "@/lib/actions/members";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,19 +18,27 @@ import { Textarea } from "@/components/ui/textarea";
 export function MemberCreateForm() {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
-    const fd = new FormData(e.currentTarget);
-    const res = await createMember(fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmitting(true);
+    try {
+      const res = await createMember(fd);
+      if ("error" in res && res.error) {
+        setMsg(res.error);
+        return;
+      }
+      form.reset();
+      setMsg("Member created.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    e.currentTarget.reset();
-    setMsg("Member created.");
-    router.refresh();
   }
 
   return (
@@ -67,7 +76,9 @@ export function MemberCreateForm() {
             <Input id="m-status" name="status" defaultValue="active" />
           </div>
           <div className="flex items-end">
-            <Button type="submit">Save member</Button>
+            <SubmitButton loading={submitting} loadingText="Saving…">
+              Save member
+            </SubmitButton>
           </div>
         </form>
       </CardContent>

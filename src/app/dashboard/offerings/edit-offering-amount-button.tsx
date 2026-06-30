@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { updateOfferingLine } from "@/lib/actions/weekly-offerings";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { parseAmountInput } from "@/lib/format/currency-input";
@@ -21,6 +22,7 @@ export function EditOfferingAmountButton({
   const [msg, setMsg] = useState<string | null>(null);
 
   async function onSave() {
+    if (pending) return;
     setPending(true);
     setMsg(null);
     try {
@@ -54,11 +56,24 @@ export function EditOfferingAmountButton({
         value={amount}
         onValueChange={setAmount}
         emptyZero={false}
+        disabled={pending}
       />
-      <Button type="button" size="sm" disabled={pending} onClick={() => void onSave()}>
+      <ActionButton
+        type="button"
+        size="sm"
+        loading={pending}
+        loadingText="Saving…"
+        onClick={() => void onSave()}
+      >
         Save
-      </Button>
-      <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => setEditing(false)}>
+      </ActionButton>
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        disabled={pending}
+        onClick={() => setEditing(false)}
+      >
         Cancel
       </Button>
       {msg ? <span className="text-xs text-destructive">{msg}</span> : null}

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { sendChurchSms, updateSmsOptIn } from "@/lib/actions/sms";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +13,7 @@ export function SmsSection({ smsOptIn }: { smsOptIn: boolean }) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
   const [optIn, setOptIn] = useState(smsOptIn);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onToggle(checked: boolean) {
     setOptIn(checked);
@@ -24,14 +25,21 @@ export function SmsSection({ smsOptIn }: { smsOptIn: boolean }) {
 
   async function onSend(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
-    const fd = new FormData(e.currentTarget);
-    const res = await sendChurchSms(fd);
-    if ("error" in res && res.error) setMsg(res.error);
-    else {
-      setMsg("Sent (or logged if provider failed — check table).");
-      e.currentTarget.reset();
-      router.refresh();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmitting(true);
+    try {
+      const res = await sendChurchSms(fd);
+      if ("error" in res && res.error) setMsg(res.error);
+      else {
+        setMsg("Sent (or logged if provider failed — check table).");
+        form.reset();
+        router.refresh();
+      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -65,7 +73,9 @@ export function SmsSection({ smsOptIn }: { smsOptIn: boolean }) {
               <Label htmlFor="body">Message</Label>
               <Input id="body" name="body" required />
             </div>
-            <Button type="submit">Send</Button>
+            <SubmitButton loading={submitting} loadingText="Sending…">
+              Send
+            </SubmitButton>
           </form>
         </CardContent>
       </Card>

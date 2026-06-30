@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   canIssueTravelCertificates,
@@ -86,6 +87,9 @@ export function TravelCertificatesClient({
   const [manualDependantName, setManualDependantName] = useState("");
   const [manualDependantAge, setManualDependantAge] = useState("");
   const [manualDependantContacts, setManualDependantContacts] = useState("");
+  const [submittingForm, setSubmittingForm] = useState<
+    null | "request" | "staff" | "settings" | "issuer"
+  >(null);
 
   const householdLookup = useMemo(() => {
     const map = new Map<string, string>();
@@ -108,83 +112,108 @@ export function TravelCertificatesClient({
 
   async function onMemberRequest(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingForm) return;
     setMsg(null);
     setMsgIsError(false);
-    const fd = new FormData(e.currentTarget);
-    const res = await requestTravelCertificate(fd);
-    if ("error" in res && res.error) {
-      setMsgIsError(true);
-      setMsg(res.error);
-      return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmittingForm("request");
+    try {
+      const res = await requestTravelCertificate(fd);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      setMsgIsError(false);
+      setMsg("Travel certificate request submitted.");
+      form.reset();
+      setRequestForDependent(false);
+      setSelectedDependantKey("");
+      setManualDependantName("");
+      setManualDependantAge("");
+      setManualDependantContacts("");
+      router.refresh();
+    } finally {
+      setSubmittingForm(null);
     }
-    setMsgIsError(false);
-    setMsg("Travel certificate request submitted.");
-    const form = e.currentTarget as HTMLFormElement;
-    form.reset();
-    setRequestForDependent(false);
-    setSelectedDependantKey("");
-    setManualDependantName("");
-    setManualDependantAge("");
-    setManualDependantContacts("");
-    router.refresh();
   }
 
   async function onStaffSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingForm) return;
     setMsg(null);
     setMsgIsError(false);
-    const fd = new FormData(e.currentTarget);
-    const res = await upsertTravelCertificateByStaff(fd);
-    if ("error" in res && res.error) {
-      setMsgIsError(true);
-      setMsg(res.error);
-      return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmittingForm("staff");
+    try {
+      const res = await upsertTravelCertificateByStaff(fd);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      setMsgIsError(false);
+      setMsg("Certificate created successfully.");
+      form.reset();
+      router.refresh();
+    } finally {
+      setSubmittingForm(null);
     }
-    setMsgIsError(false);
-    setMsg("Certificate created successfully.");
-    (e.currentTarget as HTMLFormElement).reset();
-    router.refresh();
   }
 
   async function onSaveSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingForm) return;
     setMsg(null);
     setMsgIsError(false);
     const fd = new FormData(e.currentTarget);
     if (logoDataUrl) fd.set("logo_data_url", logoDataUrl);
     if (defaultSignatureDataUrl) fd.set("pastor_signature_data_url", defaultSignatureDataUrl);
     if (defaultStampDataUrl) fd.set("pastor_stamp_data_url", defaultStampDataUrl);
-    const res = await saveCertificateSettings(fd);
-    if ("error" in res && res.error) {
-      setMsgIsError(true);
-      setMsg(res.error);
-      return;
+    setSubmittingForm("settings");
+    try {
+      const res = await saveCertificateSettings(fd);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      setMsgIsError(false);
+      setMsg("Certificate settings saved.");
+      setLogoDataUrl("");
+      setDefaultSignatureDataUrl("");
+      setDefaultStampDataUrl("");
+      router.refresh();
+    } finally {
+      setSubmittingForm(null);
     }
-    setMsgIsError(false);
-    setMsg("Certificate settings saved.");
-    setLogoDataUrl("");
-    setDefaultSignatureDataUrl("");
-    setDefaultStampDataUrl("");
-    router.refresh();
   }
 
   async function onSaveIssuerAssets(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submittingForm) return;
     setMsg(null);
     setMsgIsError(false);
     const fd = new FormData(e.currentTarget);
     if (issuerSignatureDataUrl) fd.set("signature_data_url", issuerSignatureDataUrl);
     if (issuerStampDataUrl) fd.set("stamp_data_url", issuerStampDataUrl);
-    const res = await saveMyIssuerAssets(fd);
-    if ("error" in res && res.error) {
-      setMsgIsError(true);
-      setMsg(res.error);
-      return;
+    setSubmittingForm("issuer");
+    try {
+      const res = await saveMyIssuerAssets(fd);
+      if ("error" in res && res.error) {
+        setMsgIsError(true);
+        setMsg(res.error);
+        return;
+      }
+      setMsg("Issuer signature and stamp saved.");
+      setIssuerSignatureDataUrl("");
+      setIssuerStampDataUrl("");
+      router.refresh();
+    } finally {
+      setSubmittingForm(null);
     }
-    setMsg("Issuer signature and stamp saved.");
-    setIssuerSignatureDataUrl("");
-    setIssuerStampDataUrl("");
-    router.refresh();
   }
 
   return (
@@ -279,7 +308,9 @@ export function TravelCertificatesClient({
                 />
               </div>
               <div className="sm:col-span-2">
-                <Button type="submit">Save settings</Button>
+                <SubmitButton loading={submittingForm === "settings"} loadingText="Saving…">
+                  Save settings
+                </SubmitButton>
               </div>
             </form>
           </CardContent>
@@ -316,7 +347,9 @@ export function TravelCertificatesClient({
                 </p>
               </div>
               <div className="sm:col-span-2">
-                <Button type="submit">Save my issuer assets</Button>
+                <SubmitButton loading={submittingForm === "issuer"} loadingText="Saving…">
+                  Save my issuer assets
+                </SubmitButton>
               </div>
             </form>
           </CardContent>
@@ -491,7 +524,9 @@ export function TravelCertificatesClient({
               </select>
             </div>
             <div className="sm:col-span-2">
-              <Button type="submit">Submit request</Button>
+              <SubmitButton loading={submittingForm === "request"} loadingText="Submitting…">
+                Submit request
+              </SubmitButton>
             </div>
           </form>
         </CardContent>
@@ -597,7 +632,9 @@ export function TravelCertificatesClient({
                 <Textarea id="other_notes_staff" name="other_notes" rows={3} />
               </div>
               <div className="sm:col-span-2">
-                <Button type="submit">Create Certificate</Button>
+                <SubmitButton loading={submittingForm === "staff"} loadingText="Creating…">
+                  Create Certificate
+                </SubmitButton>
               </div>
             </form>
           </CardContent>

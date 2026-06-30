@@ -845,12 +845,20 @@ export async function updateOfferingLine(input: {
     return { error: "This offering can only be edited before authorization or after rejection" };
   }
 
-  const { error: upErr } = await supabase
+  const { data: updated, error: upErr } = await supabase
     .from("offerings")
     .update({ amount })
     .eq("id", row.id)
-    .eq("org_id", orgId);
+    .eq("org_id", orgId)
+    .select("id")
+    .maybeSingle();
   if (upErr) return { error: upErr.message };
+  if (!updated?.id) {
+    return {
+      error:
+        "Could not save this change. The batch may already be authorized, or you may not have permission.",
+    };
+  }
 
   revalidatePath("/dashboard/offerings");
   return { ok: true };

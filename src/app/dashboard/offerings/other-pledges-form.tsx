@@ -9,6 +9,7 @@ import {
   OFFERING_BATCH_SLOT_SECOND_SERVICE,
   offeringBatchSlotLabel,
 } from "@/lib/offering/weekly";
+import { ActionButton } from "@/components/ui/action-button";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyInput } from "@/components/ui/currency-input";
@@ -102,6 +103,7 @@ export function OtherPledgesForm({
   }
 
   async function onSave() {
+    if (pending) return;
     setMsg(null);
     setErr(null);
     if (noOfferingNumber) {
@@ -291,9 +293,9 @@ export function OtherPledgesForm({
           <CurrencyInput value={paidAmount} onValueChange={setPaidAmount} placeholder="0" />
         </div>
       </div>
-      <Button type="button" onClick={() => void onSave()} disabled={pending}>
-        {pending ? "Saving…" : "Save / Hifadhi"}
-      </Button>
+      <ActionButton type="button" onClick={() => void onSave()} loading={pending} loadingText="Saving…">
+        Save / Hifadhi
+      </ActionButton>
       {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
       {err ? <p className="text-sm text-destructive">{err}</p> : null}
     </div>

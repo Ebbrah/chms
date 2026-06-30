@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { rejectOfferingWeekBatch } from "@/lib/actions/weekly-offerings";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/ui/action-button";
 
 export function RejectBatchButton({ batchId }: { batchId: string }) {
   const router = useRouter();
@@ -11,6 +11,7 @@ export function RejectBatchButton({ batchId }: { batchId: string }) {
   const [pending, setPending] = useState(false);
 
   async function onReject() {
+    if (pending) return;
     setMsg(null);
     setPending(true);
     try {
@@ -27,9 +28,16 @@ export function RejectBatchButton({ batchId }: { batchId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => void onReject()}>
-        {pending ? "…" : "Reject"}
-      </Button>
+      <ActionButton
+        type="button"
+        size="sm"
+        variant="outline"
+        loading={pending}
+        loadingText="Rejecting…"
+        onClick={() => void onReject()}
+      >
+        Reject
+      </ActionButton>
       {msg ? <span className="text-xs text-destructive">{msg}</span> : null}
     </div>
   );

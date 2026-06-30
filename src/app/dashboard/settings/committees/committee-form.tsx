@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createCommittee } from "@/lib/actions/admin-setup";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -25,19 +25,27 @@ type ChairpersonOption = { id: string; full_name: string | null };
 export function CommitteeForm({ chairpersonOptions }: { chairpersonOptions: ChairpersonOption[] }) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
-    const fd = new FormData(e.currentTarget);
-    const res = await createCommittee(fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    setSubmitting(true);
+    try {
+      const res = await createCommittee(fd);
+      if ("error" in res && res.error) {
+        setMsg(res.error);
+        return;
+      }
+      form.reset();
+      setMsg("Committee created.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    e.currentTarget.reset();
-    setMsg("Committee created.");
-    router.refresh();
   }
 
   return (
@@ -68,7 +76,9 @@ export function CommitteeForm({ chairpersonOptions }: { chairpersonOptions: Chai
               </SelectContent>
             </Select>
           </div>
-          <Button type="submit">Create</Button>
+          <SubmitButton loading={submitting} loadingText="Creating…">
+            Create
+          </SubmitButton>
         </form>
       </CardContent>
     </Card>
