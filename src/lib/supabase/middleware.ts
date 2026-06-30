@@ -55,7 +55,8 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const needsAuth =
     path.startsWith("/dashboard") ||
-    path.startsWith("/platform");
+    path.startsWith("/platform") ||
+    path.startsWith("/regional");
 
   if (needsAuth && !user) {
     const redirect = NextResponse.redirect(new URL("/login", request.url));

@@ -9,16 +9,7 @@ import {
   useNavProgress,
 } from "@/components/layout/navigation-progress";
 
-const links = [
-  { href: "/platform", label: "Overview", exact: true },
-  { href: "/platform/dioceses", label: "Dayosisi" },
-  { href: "/platform/districts", label: "Jimbo" },
-  { href: "/platform/parishes", label: "Parishes" },
-  { href: "/platform/officers", label: "Officers" },
-  { href: "/platform/transfers", label: "Transfers" },
-];
-
-function PlatformNavLink({
+function RegionalNavLink({
   href,
   label,
   active,
@@ -50,25 +41,47 @@ function PlatformNavLink({
   );
 }
 
-export function PlatformNav() {
+export function RegionalNav({
+  basePath,
+  showFinance,
+  horizontal,
+}: {
+  basePath: string;
+  showFinance: boolean;
+  horizontal?: boolean;
+}) {
   const pathname = usePathname();
+  const links = [
+    { href: basePath, label: "Overview", exact: true },
+    { href: `${basePath}/demographics`, label: "Demographics" },
+    { href: `${basePath}/finance`, label: "Finance totals" },
+    { href: `${basePath}/registry`, label: "Registry search" },
+  ];
+  const visible = showFinance ? links : links.filter((l) => !l.href.endsWith("/finance"));
 
   return (
     <NavigationProgressProvider>
-      <nav className="flex flex-col gap-1 p-2">
-        {links.map((link) => {
+      <nav
+        className={cn(
+          "flex gap-1 p-2",
+          horizontal ? "min-w-max flex-row flex-nowrap" : "flex-col",
+        )}
+      >
+        {visible.map((link) => {
           const active =
             link.exact === true ? pathname === link.href : pathname.startsWith(link.href);
           return (
-            <PlatformNavLink key={link.href} href={link.href} label={link.label} active={active} />
+            <RegionalNavLink key={link.href} href={link.href} label={link.label} active={active} />
           );
         })}
-        <Link
-          href="/dashboard"
-          className="mt-4 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-        >
-          ← Parish dashboard
-        </Link>
+        {!horizontal ? (
+          <Link
+            href="/dashboard"
+            className="mt-4 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            ← Parish dashboard
+          </Link>
+        ) : null}
       </nav>
     </NavigationProgressProvider>
   );

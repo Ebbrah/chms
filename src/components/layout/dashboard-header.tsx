@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { canAccessPlatform } from "@/lib/auth/platform-guard";
+import { canAccessRegional, getRegionalEntryPath } from "@/lib/auth/regional-guard";
 import { getProfile, getSessionUser } from "@/lib/auth/session";
 import { getCurrentParishBranding } from "@/lib/platform/parish-branding";
 import { ThemeToggle } from "./theme-toggle";
@@ -10,6 +11,8 @@ export async function DashboardHeader() {
   let displayName = "Member";
   let parish: Awaited<ReturnType<typeof getCurrentParishBranding>> = null;
   let showPlatform = false;
+  let showRegional = false;
+  let regionalHref = "/regional";
 
   try {
     const user = await getSessionUser();
@@ -33,6 +36,13 @@ export async function DashboardHeader() {
     showPlatform = await canAccessPlatform();
   } catch {
     /* Platform link hidden when MT tables lag. */
+  }
+
+  try {
+    showRegional = await canAccessRegional();
+    if (showRegional) regionalHref = await getRegionalEntryPath();
+  } catch {
+    /* Regional link hidden when officer tables lag. */
   }
 
   return (
@@ -63,6 +73,14 @@ export async function DashboardHeader() {
             className="text-xs font-medium text-primary hover:underline"
           >
             Platform
+          </Link>
+        ) : null}
+        {showRegional ? (
+          <Link
+            href={regionalHref}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            Regional
           </Link>
         ) : null}
         <ThemeToggle />
