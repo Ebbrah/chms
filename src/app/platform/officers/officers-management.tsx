@@ -49,6 +49,18 @@ type DistrictOfficerRow = {
   districts: { name: string } | null;
 };
 
+type SectionState = {
+  loading: boolean;
+  message: string | null;
+  error: string | null;
+};
+
+const initialSectionState = (): SectionState => ({
+  loading: false,
+  message: null,
+  error: null,
+});
+
 export function OfficersManagement({
   dioceses,
   districts,
@@ -61,9 +73,8 @@ export function OfficersManagement({
   districtOfficers: DistrictOfficerRow[];
 }) {
   const router = useRouter();
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [dioceseState, setDioceseState] = useState<SectionState>(initialSectionState);
+  const [districtState, setDistrictState] = useState<SectionState>(initialSectionState);
   const [dioceseId, setDioceseId] = useState(dioceses[0]?.id ?? "");
   const [dioceseRole, setDioceseRole] = useState<DioceseOfficerRole | "">("");
   const [districtId, setDistrictId] = useState(districts[0]?.id ?? "");
@@ -72,68 +83,83 @@ export function OfficersManagement({
   async function handleAssignDiocese(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!dioceseId || !dioceseRole) return;
-    setLoading(true);
-    setMessage(null);
-    setError(null);
+    setDioceseState({ loading: true, message: null, error: null });
     const fd = new FormData(e.currentTarget);
     fd.set("diocese_id", dioceseId);
     fd.set("role", dioceseRole);
     const res = await assignDioceseOfficer(fd);
-    setLoading(false);
     if ("error" in res && res.error) {
-      setError(res.error);
+      setDioceseState({ loading: false, message: null, error: res.error });
       return;
     }
-    setMessage("Dayosisi officer assigned.");
+    setDioceseState({
+      loading: false,
+      message: "Dayosisi officer assigned.",
+      error: null,
+    });
     e.currentTarget.reset();
+    setDioceseRole("");
     router.refresh();
   }
 
   async function handleAssignDistrict(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!districtId || !districtRole) return;
-    setLoading(true);
-    setMessage(null);
-    setError(null);
+    setDistrictState({ loading: true, message: null, error: null });
     const fd = new FormData(e.currentTarget);
     fd.set("district_id", districtId);
     fd.set("role", districtRole);
     const res = await assignDistrictOfficer(fd);
-    setLoading(false);
     if ("error" in res && res.error) {
-      setError(res.error);
+      setDistrictState({ loading: false, message: null, error: res.error });
       return;
     }
-    setMessage("Jimbo officer assigned.");
+    setDistrictState({
+      loading: false,
+      message: "Jimbo officer assigned.",
+      error: null,
+    });
     e.currentTarget.reset();
+    setDistrictRole("");
     router.refresh();
   }
 
-  async function handleRemove(kind: "diocese" | "district", id: string) {
-    setLoading(true);
-    setError(null);
-    const res =
-      kind === "diocese" ? await removeDioceseOfficer(id) : await removeDistrictOfficer(id);
-    setLoading(false);
-    if ("error" in res && res.error) setError(res.error);
-    else router.refresh();
+  async function handleRemoveDiocese(id: string) {
+    setDioceseState({ loading: true, message: null, error: null });
+    const res = await removeDioceseOfficer(id);
+    if ("error" in res && res.error) {
+      setDioceseState({ loading: false, message: null, error: res.error });
+      return;
+    }
+    setDioceseState({ loading: false, message: null, error: null });
+    router.refresh();
+  }
+
+  async function handleRemoveDistrict(id: string) {
+    setDistrictState({ loading: true, message: null, error: null });
+    const res = await removeDistrictOfficer(id);
+    if ("error" in res && res.error) {
+      setDistrictState({ loading: false, message: null, error: res.error });
+      return;
+    }
+    setDistrictState({ loading: false, message: null, error: null });
+    router.refresh();
   }
 
   return (
     <div className="space-y-8">
-      {error ? (
-        <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-      {message ? (
-        <Alert>
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
-      ) : null}
-
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Assign dayosisi officer</h2>
+        {dioceseState.error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{dioceseState.error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {dioceseState.message ? (
+          <Alert>
+            <AlertDescription>{dioceseState.message}</AlertDescription>
+          </Alert>
+        ) : null}
         <form
           onSubmit={(e) => void handleAssignDiocese(e)}
           className="grid max-w-xl gap-4 sm:grid-cols-2"
@@ -175,14 +201,32 @@ export function OfficersManagement({
               </SelectContent>
             </Select>
           </div>
-          <Button type="submit" disabled={loading || !dioceseRole} className="sm:col-span-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign dayosisi officer"}
+          <Button
+            type="submit"
+            disabled={dioceseState.loading || !dioceseRole}
+            className="sm:col-span-2"
+          >
+            {dioceseState.loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Assign dayosisi officer"
+            )}
           </Button>
         </form>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Assign jimbo officer</h2>
+        {districtState.error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{districtState.error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {districtState.message ? (
+          <Alert>
+            <AlertDescription>{districtState.message}</AlertDescription>
+          </Alert>
+        ) : null}
         <form
           onSubmit={(e) => void handleAssignDistrict(e)}
           className="grid max-w-xl gap-4 sm:grid-cols-2"
@@ -224,8 +268,16 @@ export function OfficersManagement({
               </SelectContent>
             </Select>
           </div>
-          <Button type="submit" disabled={loading || !districtRole} className="sm:col-span-2">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign jimbo officer"}
+          <Button
+            type="submit"
+            disabled={districtState.loading || !districtRole}
+            className="sm:col-span-2"
+          >
+            {districtState.loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              "Assign jimbo officer"
+            )}
           </Button>
         </form>
       </section>
@@ -240,8 +292,8 @@ export function OfficersManagement({
             email: o.profiles?.email ?? "—",
             role: DIOCESE_ROLE_LABELS[o.role as DioceseOfficerRole] ?? o.role,
           }))}
-          onRemove={(id) => void handleRemove("diocese", id)}
-          loading={loading}
+          onRemove={(id) => void handleRemoveDiocese(id)}
+          loading={dioceseState.loading}
         />
       </section>
 
@@ -255,8 +307,8 @@ export function OfficersManagement({
             email: o.profiles?.email ?? "—",
             role: DISTRICT_ROLE_LABELS[o.role as DistrictOfficerRole] ?? o.role,
           }))}
-          onRemove={(id) => void handleRemove("district", id)}
-          loading={loading}
+          onRemove={(id) => void handleRemoveDistrict(id)}
+          loading={districtState.loading}
         />
       </section>
     </div>

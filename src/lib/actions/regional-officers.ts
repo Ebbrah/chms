@@ -23,20 +23,19 @@ export async function assignDioceseOfficer(formData: FormData) {
   if (!dioceseId || !email || !role) return { error: "Dayosisi, email, and role are required" };
 
   const supabase = await createClient();
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("id")
-    .ilike("email", email)
-    .maybeSingle();
+  const { data: profileId, error: profileErr } = await supabase.rpc(
+    "lookup_profile_id_by_email",
+    { _email: email },
+  );
 
   if (profileErr) return { error: profileErr.message };
-  if (!profile?.id) {
+  if (!profileId) {
     return { error: "No account found for that email. Ask them to sign up first." };
   }
 
   const { error } = await supabase.rpc("assign_diocese_officer", {
     _diocese_id: dioceseId,
-    _user_id: profile.id,
+    _user_id: profileId,
     _role: role,
   });
   if (error) return { error: error.message };
@@ -58,20 +57,19 @@ export async function assignDistrictOfficer(formData: FormData) {
   if (!districtId || !email || !role) return { error: "Jimbo, email, and role are required" };
 
   const supabase = await createClient();
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("id")
-    .ilike("email", email)
-    .maybeSingle();
+  const { data: profileId, error: profileErr } = await supabase.rpc(
+    "lookup_profile_id_by_email",
+    { _email: email },
+  );
 
   if (profileErr) return { error: profileErr.message };
-  if (!profile?.id) {
+  if (!profileId) {
     return { error: "No account found for that email. Ask them to sign up first." };
   }
 
   const { error } = await supabase.rpc("assign_district_officer", {
     _district_id: districtId,
-    _user_id: profile.id,
+    _user_id: profileId,
     _role: role,
   });
   if (error) return { error: error.message };
