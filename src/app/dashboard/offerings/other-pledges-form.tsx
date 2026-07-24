@@ -30,8 +30,11 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 export function OtherPledgesForm({
   defaultBatchSlot = OFFERING_BATCH_SLOT_MIDWEEK,
+  recordedPledgeTitles = [],
 }: {
   defaultBatchSlot?: number;
+  /** Distinct ahadi / sadaka names already recorded in this parish. */
+  recordedPledgeTitles?: string[];
 }) {
   const router = useRouter();
   const [batchSlot, setBatchSlot] = useState(defaultBatchSlot);
@@ -41,6 +44,8 @@ export function OtherPledgesForm({
   const [selected, setSelected] = useState<Hit | null>(null);
   const [pledgeDate, setPledgeDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [title, setTitle] = useState("");
+  const [customTitle, setCustomTitle] = useState("");
+  const [useCustomTitle, setUseCustomTitle] = useState(false);
   const [amount, setAmount] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
   const [manualFullName, setManualFullName] = useState("");
@@ -117,10 +122,15 @@ export function OtherPledgesForm({
     }
     setPending(true);
     try {
+      const pledgeTitle = useCustomTitle ? customTitle.trim() : title.trim();
+      if (!pledgeTitle) {
+        setErr("Chagua au andika jina la ahadi / sadaka.");
+        return;
+      }
       const fd = new FormData();
       if (!noOfferingNumber && selected?.memberId) fd.set("member_id", selected.memberId);
       fd.set("pledge_date", pledgeDate);
-      fd.set("title", title);
+      fd.set("title", pledgeTitle);
       fd.set("amount", String(parseAmountInput(amount)));
       fd.set("paid_amount", String(parseAmountInput(paidAmount)));
       fd.set("full_name", noOfferingNumber ? manualFullName.trim() : selected?.fullName?.trim() || "");
@@ -134,6 +144,8 @@ export function OtherPledgesForm({
       }
       setMsg("Ahadi nyingine imehifadhiwa.");
       setTitle("");
+      setCustomTitle("");
+      setUseCustomTitle(false);
       setAmount("");
       setPaidAmount("");
       setSelected(null);
@@ -224,7 +236,7 @@ export function OtherPledgesForm({
             <div className="max-h-40 overflow-y-auto rounded-md border p-2 text-sm">
               {hits.map((h) => (
                 <button
-                  key={h.memberId}
+                  key={`${h.source}-${h.offeringNumber}`}
                   type="button"
                   className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-muted ${
                     selected?.memberId === h.memberId ? "bg-muted font-medium" : ""
@@ -280,9 +292,51 @@ export function OtherPledgesForm({
           <Label>Tarehe</Label>
           <Input type="date" value={pledgeDate} onChange={(e) => setPledgeDate(e.target.value)} />
         </div>
-        <div className="grid gap-2">
-          <Label>Jina la ahadi / sadaka</Label>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Kwa mfano: Ujenzi…" />
+        <div className="grid gap-2 sm:col-span-2">
+          <Label htmlFor="pledge-title">Jina la ahadi / sadaka</Label>
+          {recordedPledgeTitles.length > 0 ? (
+            <>
+              <select
+                id="pledge-title"
+                value={useCustomTitle ? "__custom__" : title}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__custom__") {
+                    setUseCustomTitle(true);
+                    setTitle("");
+                    return;
+                  }
+                  setUseCustomTitle(false);
+                  setCustomTitle("");
+                  setTitle(v);
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+              >
+                <option value="">Chagua ahadi / sadaka…</option>
+                {recordedPledgeTitles.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                <option value="__custom__">Ingiza jina jipya…</option>
+              </select>
+              {useCustomTitle ? (
+                <Input
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  placeholder="Kwa mfano: Ujenzi…"
+                  autoComplete="off"
+                />
+              ) : null}
+            </>
+          ) : (
+            <Input
+              id="pledge-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Kwa mfano: Ujenzi…"
+            />
+          )}
         </div>
         <div className="grid gap-2">
           <Label>Kiasi (TZS)</Label>

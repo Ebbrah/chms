@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     serverActions: {
       bodySizeLimit: "4mb",
     },
+    optimizePackageImports: ["lucide-react", "date-fns"],
   },
   images: {
     remotePatterns: supabaseHostname

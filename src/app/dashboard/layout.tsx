@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
 import { DashboardNav } from "@/components/layout/dashboard-nav";
+import { RegistrationStatusBanner } from "@/components/members/registration-status-banner";
 import { getMyRoles, getSessionUser } from "@/lib/auth/session";
 import { getCurrentParishBranding } from "@/lib/platform/parish-branding";
 import type { AppRole } from "@/lib/auth/roles";
@@ -23,21 +24,13 @@ export default async function DashboardLayout({
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  let roles: AppRole[] = [];
-  let brandLabel = "Ebenezer";
+  const [rolesResult, parish] = await Promise.all([
+    getMyRoles().then(toSerializableRoles).catch(() => [] as AppRole[]),
+    getCurrentParishBranding().catch(() => null),
+  ]);
 
-  try {
-    roles = toSerializableRoles(await getMyRoles());
-  } catch {
-    /* Keep sidebar usable if role query fails. */
-  }
-
-  try {
-    const parish = await getCurrentParishBranding();
-    if (parish?.displayName) brandLabel = parish.displayName;
-  } catch {
-    /* Default label is fine. */
-  }
+  const roles = rolesResult;
+  const brandLabel = parish?.displayName ?? "Ebenezer";
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
@@ -64,7 +57,10 @@ export default async function DashboardLayout({
           </div>
         </div>
         <DashboardHeader />
-        <main className="flex-1 p-4 md:p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6">
+          <RegistrationStatusBanner />
+          {children}
+        </main>
       </div>
     </div>
   );

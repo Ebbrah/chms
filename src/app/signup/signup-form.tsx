@@ -26,11 +26,16 @@ export function SignupForm({
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [hasOfferingNumber, setHasOfferingNumber] = useState<"yes" | "no" | "">("");
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!parishSlug) {
       setError("Registration requires a parish join link from your church.");
+      return;
+    }
+    if (!hasOfferingNumber) {
+      setError("Please indicate whether you have an offering number.");
       return;
     }
     setError(null);
@@ -49,7 +54,14 @@ export function SignupForm({
     ).trim();
     const phone = (form.elements.namedItem("phone") as HTMLInputElement)?.value ?? "";
     const offeringNumber =
-      (form.elements.namedItem("offeringNumber") as HTMLInputElement)?.value ?? "";
+      hasOfferingNumber === "yes"
+        ? ((form.elements.namedItem("offeringNumber") as HTMLInputElement)?.value ?? "").trim()
+        : "";
+    if (hasOfferingNumber === "yes" && !offeringNumber) {
+      setLoading(false);
+      setError("Please enter your offering number.");
+      return;
+    }
     const redirectTo =
       typeof window !== "undefined" ? `${window.location.origin}${redirectPath}` : undefined;
     const supabase = createClient();
@@ -61,7 +73,7 @@ export function SignupForm({
         data: {
           full_name: fullName,
           phone: phone.trim() || null,
-          offering_number: offeringNumber.trim() || null,
+          offering_number: offeringNumber || null,
           parish_slug: parishSlug,
         },
       },
@@ -73,10 +85,15 @@ export function SignupForm({
     }
     setLoading(false);
     form.reset();
+    setHasOfferingNumber("");
     setSubmitted(true);
     setMessage(
       parishName
-        ? `Check your email to confirm your ${parishName} account, then sign in.`
+        ? `Check your email to confirm your ${parishName} account, then sign in.${
+            hasOfferingNumber === "no"
+              ? " After sign-in you will complete your member profile."
+              : ""
+          }`
         : "Check your email to confirm your account, then sign in.",
     );
     router.refresh();
@@ -101,9 +118,42 @@ export function SignupForm({
         <Input id="fullName" name="fullName" required autoComplete="name" />
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="offeringNumber">Namba ya Bahasha</Label>
-        <Input id="offeringNumber" name="offeringNumber" autoComplete="off" />
+        <Label>Je, una namba ya bahasha (offering number)?</Label>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="hasOfferingNumber"
+              value="yes"
+              checked={hasOfferingNumber === "yes"}
+              onChange={() => setHasOfferingNumber("yes")}
+            />
+            Ndio
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="hasOfferingNumber"
+              value="no"
+              checked={hasOfferingNumber === "no"}
+              onChange={() => setHasOfferingNumber("no")}
+            />
+            Hapana
+          </label>
+        </div>
       </div>
+      {hasOfferingNumber === "yes" ? (
+        <div className="grid gap-2">
+          <Label htmlFor="offeringNumber">Namba ya Bahasha</Label>
+          <Input id="offeringNumber" name="offeringNumber" autoComplete="off" required />
+        </div>
+      ) : null}
+      {hasOfferingNumber === "no" ? (
+        <p className="text-sm text-muted-foreground">
+          You can register now without an offering number. After email verification and sign-in,
+          you will complete your member profile and wait for parish approval.
+        </p>
+      ) : null}
       <div className="grid gap-2">
         <Label htmlFor="phone">Namba ya Simu</Label>
         <Input id="phone" name="phone" autoComplete="tel" />

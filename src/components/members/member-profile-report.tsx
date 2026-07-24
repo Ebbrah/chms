@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import Image from "next/image";
-import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatAmountTZS } from "@/lib/format/amount";
@@ -13,7 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { loadChairProfileForHousehold, loadEldersForHousehold } from "@/lib/members/household-leaders";
+import { loadMemberProfileReportData, type MemberProfileReportData } from "@/lib/members/profile-report-data";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 type Details = Record<string, unknown>;
 
@@ -66,53 +66,55 @@ export async function MemberProfileReport({
   profileId,
   canEdit = false,
   backHref = "/dashboard",
+  initialData,
 }: {
   profileId: string;
   canEdit?: boolean;
   backHref?: string;
+  /** When provided (e.g. from my-profile page), skips a duplicate Supabase round-trip. */
+  initialData?: MemberProfileReportData | null;
 }) {
-  const supabase = await createClient();
+  let data = initialData ?? null;
+  let loadFailed = false;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, email")
-    .eq("id", profileId)
-    .single();
-  if (!profile) return null;
+  if (initialData === undefined) {
+    const loaded = await loadMemberProfileReportData(profileId);
+    if (loaded.ok) {
+      data = loaded.data;
+    } else {
+      loadFailed = true;
+    }
+  }
 
-  const { data: member } = await supabase
-    .from("members")
-    .select("*")
-    .eq("user_id", profileId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  if (loadFailed) {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>Could not load profile report</AlertTitle>
+        <AlertDescription>
+          The server could not load your member profile right now. Wait a moment and refresh the
+          page. If this keeps happening, contact the parish office.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
+  if (!data) {
+    return (
+      <Alert>
+        <AlertTitle>Profile report unavailable</AlertTitle>
+        <AlertDescription>
+          No profile data was found for this account. If you just registered, complete registration
+          first or contact the parish office.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  const { profile, member, household, elders } = data;
   const details =
     member?.member_details && typeof member.member_details === "object"
       ? (member.member_details as Details)
       : {};
-
-  const { data: household } = member?.household_id
-    ? await supabase
-        .from("households")
-        .select("name, chairperson_user_id")
-        .eq("id", String(member.household_id))
-        .maybeSingle()
-    : { data: null };
-  const { data: roleRows } = await supabase
-    .from("user_roles")
-    .select("role, user_id")
-    .eq("role", "pastor");
-  const roleIds = Array.from(new Set((roleRows ?? []).map((r) => String(r.user_id ?? "")).filter(Boolean)));
-  const { data: roleProfiles } = roleIds.length
-    ? await supabase.from("profiles").select("id, full_name, phone").in("id", roleIds)
-    : { data: [] };
-  const roleById = new Map((roleProfiles ?? []).map((p) => [String(p.id), p]));
-  const pastorId = (roleRows ?? []).find((r) => r.role === "pastor")?.user_id ?? null;
-  const pastor = pastorId ? roleById.get(String(pastorId)) : null;
-  const elders = await loadEldersForHousehold(supabase, member?.household_id ?? null);
-  const chair = await loadChairProfileForHousehold(supabase, member?.household_id ?? null);
 
   const ministries = Array.isArray(details.ministries)
     ? details.ministries.map((m) => String(m)).filter(Boolean)
@@ -156,6 +158,7 @@ export async function MemberProfileReport({
               alt="Passport photo"
               width={96}
               height={120}
+              unoptimized
               className="h-[120px] w-24 rounded border object-cover"
             />
           ) : (

@@ -6,7 +6,13 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Only run auth/onboarding checks on routes that need them — skip public pages.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sw.js|manifest.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/dashboard/:path*",
+    "/platform/:path*",
+    "/regional/:path*",
+    "/login",
+    "/signup",
+    "/join/:path*",
   ],
 };

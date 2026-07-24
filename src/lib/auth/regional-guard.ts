@@ -138,11 +138,13 @@ async function getPlatformAdminDistrictScope(): Promise<RegionalScope | null> {
 
 /** Primary scope for nav visibility — diocese officers take precedence over district. */
 export const getRegionalScope = cache(async (): Promise<RegionalScope | null> => {
-  return (
-    (await getDioceseOfficerScope()) ??
-    (await getDistrictOfficerScope()) ??
-    (await getPlatformAdminDioceseScope())
-  );
+  const [diocese, district] = await Promise.all([
+    getDioceseOfficerScope(),
+    getDistrictOfficerScope(),
+  ]);
+  if (diocese) return diocese;
+  if (district) return district;
+  return getPlatformAdminDioceseScope();
 });
 
 export async function getRegionalEntryPath(): Promise<string> {

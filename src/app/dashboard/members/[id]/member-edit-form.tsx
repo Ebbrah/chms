@@ -4,11 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import {
+  completeMemberRegistration,
   getHouseholdLeaderIdsForForm,
   revokeUserIfNoOfferingNumber,
+  updateMyMemberProfile,
   upsertMemberForUser,
 } from "@/lib/actions/members";
 import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/action-button";
+import { storeRegistrationSubmitError } from "@/components/members/registration-processing-notice";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,6 +65,8 @@ function detailsOf(member: Member) {
   return member.member_details as Record<string, string>;
 }
 
+type FormMode = "admin" | "self" | "onboarding";
+
 export function MemberEditForm({
   userId,
   fullName,
@@ -70,6 +76,7 @@ export function MemberEditForm({
   churchElderOptions,
   jumuiyaChairOptions,
   allowEditDisplayName,
+  mode = "admin",
 }: {
   userId: string;
   fullName: string;
@@ -79,9 +86,17 @@ export function MemberEditForm({
   churchElderOptions: ElderOpt[];
   jumuiyaChairOptions: ChairOpt[];
   allowEditDisplayName: boolean;
+  mode?: FormMode;
 }) {
   const router = useRouter();
   const [msg, setMsg] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const isSelfMode = mode === "self";
+  const isOnboardingMode = mode === "onboarding";
+  const canEditName = allowEditDisplayName && !isSelfMode && !isOnboardingMode;
+  const pledgesEditable = isOnboardingMode;
+  const showAdminFields = mode === "admin";
+  const showRevoke = mode === "admin";
   const [displayName, setDisplayName] = useState(fullName);
   useEffect(() => {
     setDisplayName(fullName);
@@ -163,6 +178,26 @@ export function MemberEditForm({
     setChildren((prev) => prev.map((r, i) => (i === index ? { ...r, [key]: value } : r)));
   }
 
+  function clearEditableFormFields(form: HTMLFormElement) {
+    form.reset();
+    setMaritalStatus("");
+    setGender("");
+    setMarriageType("");
+    setIsBaptized("");
+    setHasConfirmation("");
+    setTakesHolyCommunion("");
+    setParticipatesInJumuiya("");
+    setChurchElderUserId("");
+    setJumuiyaChairHouseholdId("");
+    setHouseholdId("__none__");
+    setPhotoDataUrl("");
+    setPhotoChanged(false);
+    setMinistries([]);
+    setChildren(
+      Array.from({ length: 7 }, () => ({ full_name: "", birth_date: "", relationship: "" })),
+    );
+  }
+
   async function onHouseholdChange(v: string) {
     setHouseholdId(v);
     setMsg(null);
@@ -183,8 +218,10 @@ export function MemberEditForm({
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (submitting) return;
     setMsg(null);
-    const fd = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const fd = new FormData(form);
     fd.set("household_id", householdId === "__none__" ? "" : householdId);
     fd.set("gender", gender);
     fd.set("marital_status", maritalStatus);
@@ -206,13 +243,39 @@ export function MemberEditForm({
       fd.set(`child_birth_date_${i}`, row.birth_date);
       fd.set(`child_relationship_${i}`, row.relationship);
     });
-    const res = await upsertMemberForUser(userId, fd);
-    if ("error" in res && res.error) {
-      setMsg(res.error);
-      return;
+
+    setSubmitting(true);
+
+    try {
+      if (isOnboardingMode) {
+        clearEditableFormFields(form);
+        router.push("/dashboard?registration=submitted");
+        void completeMemberRegistration(fd).then((res) => {
+          if ("error" in res && res.error) {
+            if (res.error !== "Registration profile already submitted.") {
+              storeRegistrationSubmitError(res.error);
+            }
+          }
+          router.refresh();
+        });
+        return;
+      }
+
+      const res = isSelfMode
+        ? await updateMyMemberProfile(fd)
+        : await upsertMemberForUser(userId, fd);
+      if ("error" in res && res.error) {
+        setMsg(res.error);
+        return;
+      }
+      if (isSelfMode) {
+        clearEditableFormFields(form);
+      }
+      setMsg("Saved successfully.");
+      router.refresh();
+    } finally {
+      setSubmitting(false);
     }
-    setMsg("Saved successfully.");
-    router.refresh();
   }
 
   async function onDelete() {
@@ -232,14 +295,35 @@ export function MemberEditForm({
     router.refresh();
   }
 
+  const cardTitle = isOnboardingMode
+    ? "Complete your member registration"
+    : isSelfMode
+      ? "Update your profile"
+      : "Member profile verification";
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Member profile verification</CardTitle>
+        <CardTitle>{cardTitle}</CardTitle>
+        {isOnboardingMode ? (
+          <p className="text-sm text-muted-foreground">
+            Fill in your member profile. Your offering number will be assigned after parish approval.
+          </p>
+        ) : null}
+        {isSelfMode ? (
+          <p className="text-sm text-muted-foreground">
+            Name, email, offering number, and pledges are managed by the parish and cannot be changed here.
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent>
         <form onSubmit={(e) => void onSubmit(e)} className="grid gap-4 sm:grid-cols-2">
-          {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
+          <fieldset disabled={submitting} className="contents">
+          {msg ? (
+            <p className={`text-sm ${msg.includes("sign in") || msg.includes("Unauthorized") ? "text-destructive" : "text-muted-foreground"}`}>
+              {msg}
+            </p>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="full_name">Member full name</Label>
             <Input
@@ -247,11 +331,15 @@ export function MemberEditForm({
               name="full_name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              readOnly={!allowEditDisplayName}
-              aria-readonly={!allowEditDisplayName}
+              readOnly={!canEditName}
+              aria-readonly={!canEditName}
             />
-            {!allowEditDisplayName ? (
-              <p className="text-xs text-muted-foreground">Only finance (treasurer / admin) can edit this name.</p>
+            {!canEditName ? (
+              <p className="text-xs text-muted-foreground">
+                {isSelfMode || isOnboardingMode
+                  ? "Your name was set at sign-up and is managed by the parish."
+                  : "Only finance (treasurer / admin) can edit this name."}
+              </p>
             ) : null}
           </div>
           <div className="grid gap-2">
@@ -282,16 +370,18 @@ export function MemberEditForm({
               />
             ) : null}
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="offering_number">Namba ya msharika (offering number)</Label>
-            <Input
-              id="offering_number"
-              name="offering_number"
-              defaultValue={String(member?.offering_number ?? "")}
-              readOnly
-            />
-            <p className="text-xs text-muted-foreground">Managed from uploaded seed data.</p>
-          </div>
+          {!isOnboardingMode ? (
+            <div className="grid gap-2">
+              <Label htmlFor="offering_number">Namba ya msharika (offering number)</Label>
+              <Input
+                id="offering_number"
+                name="offering_number"
+                defaultValue={String(member?.offering_number ?? "")}
+                readOnly
+              />
+              <p className="text-xs text-muted-foreground">Managed from uploaded seed data.</p>
+            </div>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="gender">Jinsia</Label>
             <Select value={gender} onValueChange={setGender}>
@@ -559,10 +649,12 @@ export function MemberEditForm({
               defaultValue={String(member?.join_date ?? "")}
             />
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="status">Status</Label>
-            <Input id="status" name="status" defaultValue={String(member?.status ?? "active")} />
-          </div>
+          {showAdminFields ? (
+            <div className="grid gap-2">
+              <Label htmlFor="status">Status</Label>
+              <Input id="status" name="status" defaultValue={String(member?.status ?? "active")} />
+            </div>
+          ) : null}
           <div className="grid gap-2 sm:col-span-2">
             <Label>
               Watoto/Waumini wanaokutegemea (wasio na bahasha bali wapo chini ya
@@ -634,22 +726,24 @@ export function MemberEditForm({
               defaultValue={String(member?.notes ?? "")}
             />
           </div>
-          <div className="grid gap-2 sm:col-span-2">
-            <Label htmlFor="pastoral_notes">Pastoral notes</Label>
-            <Textarea
-              id="pastoral_notes"
-              name="pastoral_notes"
-              rows={3}
-              defaultValue={String(member?.pastoral_notes ?? "")}
-            />
-          </div>
+          {showAdminFields ? (
+            <div className="grid gap-2 sm:col-span-2">
+              <Label htmlFor="pastoral_notes">Pastoral notes</Label>
+              <Textarea
+                id="pastoral_notes"
+                name="pastoral_notes"
+                rows={3}
+                defaultValue={String(member?.pastoral_notes ?? "")}
+              />
+            </div>
+          ) : null}
           <div className="grid gap-2">
             <Label htmlFor="pledge_1">Ahadi 1</Label>
             <Input
               id="pledge_1"
               name="pledge_1"
               defaultValue={String(details.pledge_1 ?? "")}
-              readOnly
+              readOnly={!pledgesEditable}
             />
           </div>
           <div className="grid gap-2">
@@ -658,7 +752,7 @@ export function MemberEditForm({
               id="pledge_2"
               name="pledge_2"
               defaultValue={String(details.pledge_2 ?? "")}
-              readOnly
+              readOnly={!pledgesEditable}
             />
           </div>
           <div className="grid gap-2 sm:col-span-2">
@@ -667,18 +761,40 @@ export function MemberEditForm({
               id="pledge_3"
               name="pledge_3"
               defaultValue={String(details.pledge_3 ?? "")}
-              readOnly
+              readOnly={!pledgesEditable}
             />
-            <p className="text-xs text-muted-foreground">
-              Pledge values are updated from seed data using the Load data action.
-            </p>
+            {!pledgesEditable ? (
+              <p className="text-xs text-muted-foreground">
+                {isSelfMode
+                  ? "Annual pledges are parish-managed and cannot be changed here."
+                  : "Pledge values are updated from seed data using the Load data action."}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Enter your annual pledges for this year. These will appear on your dashboard after approval.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <Button type="submit">Save</Button>
-            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
-              Revoke user
-            </Button>
+            <SubmitButton
+              loading={submitting}
+              loadingText={
+                isOnboardingMode
+                  ? "Submitting registration…"
+                  : isSelfMode
+                    ? "Saving profile…"
+                    : "Saving…"
+              }
+            >
+              {isOnboardingMode ? "Submit registration" : "Save"}
+            </SubmitButton>
+            {showRevoke ? (
+              <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+                Revoke user
+              </Button>
+            ) : null}
           </div>
+          </fieldset>
         </form>
       </CardContent>
     </Card>

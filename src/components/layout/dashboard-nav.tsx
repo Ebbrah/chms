@@ -29,6 +29,11 @@ const links: {
     visible: (r) => canManageMembers(r),
   },
   {
+    href: "/dashboard/members/pending-registrations",
+    label: "Pending registrations",
+    visible: (r) => canFinance(r),
+  },
+  {
     href: "/dashboard/offerings",
     label: "Offerings",
     visible: (r, isSunday) => {

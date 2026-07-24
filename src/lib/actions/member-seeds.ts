@@ -169,75 +169,20 @@ export async function applySeedToUserMember(userId: string) {
       : {};
 
   const currentOfferingNumber = cleanText(member.offering_number);
-  const detailFullName = normalizeName(oldDetails.full_name);
-  const profileFullName = normalizeName(profile?.full_name);
-  const lookupFullName = detailFullName || profileFullName;
-
-  // 1) Prefer exact offering number match (most reliable key).
-  let seedByOffering: {
-    offering_number: string;
-    full_name: string;
-    gender: string | null;
-    phone: string | null;
-    pledge_ahadi: number | null;
-    pledge_jengo: number | null;
-    pledge_dayosisi: number | null;
-    raw: Record<string, unknown> | null;
-  } | null = null;
-  if (currentOfferingNumber) {
-    const { data: byOffering, error: byOfferingError } = await supabase
-      .from("member_seeds")
-      .select("*")
-      .eq("org_id", orgId)
-      .eq("offering_number", currentOfferingNumber)
-      .maybeSingle();
-    if (byOfferingError) return { error: byOfferingError.message };
-    seedByOffering = byOffering as typeof seedByOffering;
+  if (!currentOfferingNumber) {
+    return { error: "Assign an offering number before loading seed data." };
   }
 
-  // 2) Fallback to full-name match only when offering-number match is missing.
-  let seedByName: {
-    offering_number: string;
-    full_name: string;
-    gender: string | null;
-    phone: string | null;
-    pledge_ahadi: number | null;
-    pledge_jengo: number | null;
-    pledge_dayosisi: number | null;
-    raw: Record<string, unknown> | null;
-  } | null = null;
-  if (!seedByOffering && lookupFullName) {
-    const { data: seedCandidates, error: seedError } = await supabase
-      .from("member_seeds")
-      .select("*")
-      .eq("org_id", orgId)
-      .ilike("full_name", lookupFullName);
-    if (seedError) return { error: seedError.message };
-    const exactCaseInsensitive = (seedCandidates ?? []).filter(
-      (seed) => normalizeName(seed.full_name).toLowerCase() === lookupFullName.toLowerCase(),
-    );
-    if (exactCaseInsensitive.length > 1) {
-      return { error: "Multiple seed rows found for this full name. Please make names unique in upload." };
-    }
-    seedByName = (exactCaseInsensitive[0] ?? null) as typeof seedByName;
-  }
-
-  const seed = (seedByOffering ?? seedByName) as
-    | {
-        offering_number: string;
-        full_name: string;
-        gender: string | null;
-        phone: string | null;
-        pledge_ahadi: number | null;
-        pledge_jengo: number | null;
-        pledge_dayosisi: number | null;
-        raw: Record<string, unknown> | null;
-      }
-    | null;
+  const { data: seed, error: seedError } = await supabase
+    .from("member_seeds")
+    .select("*")
+    .eq("org_id", orgId)
+    .eq("offering_number", currentOfferingNumber)
+    .maybeSingle();
+  if (seedError) return { error: seedError.message };
   if (!seed) {
     return {
-      error:
-        "No seed data found for this member (checked by offering number first, then full name).",
+      error: `No seed data found for offering number "${currentOfferingNumber}".`,
     };
   }
 
@@ -246,7 +191,7 @@ export async function applySeedToUserMember(userId: string) {
     ...(seed.raw ?? {}),
     ...oldDetails,
     // Prefer seed list spelling (complete name) over signup typos / single names.
-    full_name: seedDisplayName || String(oldDetails.full_name ?? "").trim() || lookupFullName,
+    full_name: seedDisplayName || String(oldDetails.full_name ?? "").trim() || normalizeName(profile?.full_name),
     gender: oldDetails.gender ?? seed.gender ?? "",
     // Load button should actively refresh pledge values from imported seed.
     pledge_1: seed.pledge_ahadi != null ? String(seed.pledge_ahadi) : "",

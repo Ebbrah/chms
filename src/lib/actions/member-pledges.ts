@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getMyRoles } from "@/lib/auth/session";
+import { getMyOrgId, getMyRoles } from "@/lib/auth/session";
+import { compareOfferingNumberSearchHits } from "@/lib/offering/member-search-rank";
 import {
   canEditPendingOfferings,
   canRecordMidWeekOfferings,
@@ -29,13 +30,7 @@ function sanitizeOfferingSearch(raw: string) {
 
 export async function searchMembersByOfferingNumber(query: string) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not signed in" } as const;
-
-  const { data: profile } = await supabase.from("profiles").select("org_id").eq("id", user.id).single();
-  const orgId = profile?.org_id;
+  const orgId = await getMyOrgId();
   if (!orgId) return { error: "No organization" } as const;
 
   const q = sanitizeOfferingSearch(query);
@@ -83,7 +78,7 @@ export async function searchMembersByOfferingNumber(query: string) {
       .from("member_seeds")
       .select("offering_number, full_name, phone")
       .eq("org_id", orgId)
-      .or(`offering_number.ilike.%${pat}%,full_name.ilike.%${pat}%,phone.ilike.%${pat}%`)
+      .ilike("offering_number", `%${pat}%`)
       .order("offering_number", { ascending: true })
       .limit(20);
     if (res.error) return { error: res.error.message } as const;
@@ -129,9 +124,11 @@ export async function searchMembersByOfferingNumber(query: string) {
     });
   }
 
-  return {
-    rows: Array.from(merged.values()),
-  };
+  const rowsOut = Array.from(merged.values()).sort((a, b) =>
+    compareOfferingNumberSearchHits(q, a.offeringNumber, b.offeringNumber),
+  );
+
+  return { rows: rowsOut };
 }
 
 export async function recordMemberOtherPledge(formData: FormData) {

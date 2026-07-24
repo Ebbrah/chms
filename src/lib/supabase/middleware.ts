@@ -2,8 +2,12 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", path);
+
   let supabaseResponse = NextResponse.next({
-    request,
+    request: { headers: requestHeaders },
   });
 
   const supabase = createServerClient(
@@ -19,7 +23,7 @@ export async function updateSession(request: NextRequest) {
             request.cookies.set(name, value),
           );
           supabaseResponse = NextResponse.next({
-            request,
+            request: { headers: requestHeaders },
           });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options),
@@ -32,7 +36,6 @@ export async function updateSession(request: NextRequest) {
   let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] =
     null;
   try {
-    // Validate JWT with Supabase so middleware and RSC layouts agree on auth state.
     const {
       data: { user: currentUser },
     } = await supabase.auth.getUser();
@@ -52,7 +55,22 @@ export async function updateSession(request: NextRequest) {
     });
   }
 
-  const path = request.nextUrl.pathname;
+  const isAuthEntry =
+    path === "/login" ||
+    path === "/signup" ||
+    path === "/join" ||
+    path.startsWith("/join/");
+
+  // Login/signup/join: only session refresh + redirect when already signed in (no DB reads).
+  if (isAuthEntry) {
+    if (user) {
+      const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
+      copyCookies(supabaseResponse, redirect);
+      return redirect;
+    }
+    return supabaseResponse;
+  }
+
   const needsAuth =
     path.startsWith("/dashboard") ||
     path.startsWith("/platform") ||
@@ -64,51 +82,31 @@ export async function updateSession(request: NextRequest) {
     return redirect;
   }
 
+  // Dashboard guards: one profile read reused for onboarding + suspension checks.
   if (
-    (path === "/login" || path === "/signup") &&
-    user
+    user &&
+    path.startsWith("/dashboard") &&
+    path !== "/dashboard/complete-registration" &&
+    !path.startsWith("/dashboard/suspended")
   ) {
-    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
-    copyCookies(supabaseResponse, redirect);
-    return redirect;
-  }
-
-  if ((path === "/join" || path.startsWith("/join/")) && user) {
-    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
-    copyCookies(supabaseResponse, redirect);
-    return redirect;
-  }
-
-  // Block parish users when their org is suspended (platform admin exempt).
-  if (user && path.startsWith("/dashboard") && !path.startsWith("/dashboard/suspended")) {
     try {
-      const { data: platformAdmin } = await supabase
-        .from("platform_admins")
-        .select("user_id")
-        .eq("user_id", user.id)
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("org_id, context_org_id")
+        .eq("id", user.id)
         .maybeSingle();
 
-      if (!platformAdmin?.user_id) {
-        let effectiveOrgId: string | null = null;
+      const orgId = profile?.org_id ?? null;
 
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .select("org_id, context_org_id")
-          .eq("id", user.id)
+      if (orgId) {
+        const { data: platformAdmin } = await supabase
+          .from("platform_admins")
+          .select("user_id")
+          .eq("user_id", user.id)
           .maybeSingle();
 
-        if (!profileError && profile) {
-          effectiveOrgId = profile.context_org_id ?? profile.org_id ?? null;
-        } else {
-          const { data: fallbackProfile } = await supabase
-            .from("profiles")
-            .select("org_id")
-            .eq("id", user.id)
-            .maybeSingle();
-          effectiveOrgId = fallbackProfile?.org_id ?? null;
-        }
-
-        if (effectiveOrgId) {
+        if (!platformAdmin?.user_id) {
+          const effectiveOrgId = profile?.context_org_id ?? orgId;
           const { data: org, error: orgError } = await supabase
             .from("organizations")
             .select("status")
@@ -125,7 +123,7 @@ export async function updateSession(request: NextRequest) {
         }
       }
     } catch {
-      /* Allow request through if suspension check fails (e.g. schema lag). */
+      /* Allow request through if guard queries fail. */
     }
   }
 

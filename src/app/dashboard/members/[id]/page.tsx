@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { MemberEditForm } from "./member-edit-form";
 import { getMyRoles } from "@/lib/auth/session";
 import { canFinance } from "@/lib/auth/permissions";
+import { loadMemberEditFormData } from "@/lib/members/member-form-data";
 
 export default async function MemberDetailPage({
   params,
@@ -31,72 +32,11 @@ export default async function MemberDetailPage({
     .limit(1)
     .maybeSingle();
 
-  const { data: households } = await supabase
-    .from("households")
-    .select("id, name")
-    .eq("org_id", orgId)
-    .order("name");
-
-  const { data: elderRoleRows } = await supabase
-    .from("user_roles")
-    .select("user_id")
-    .eq("role", "church_elder")
-    .eq("org_id", orgId);
-  const elderUserIds = Array.from(
-    new Set((elderRoleRows ?? []).map((r) => String(r.user_id ?? "")).filter(Boolean)),
-  );
-  const { data: churchElderProfiles } = elderUserIds.length
-    ? await supabase.from("profiles").select("id, full_name").in("id", elderUserIds).order("full_name")
-    : { data: [] };
-
-  const { data: householdsForChairs } = await supabase
-    .from("households")
-    .select("id, name, chairperson_user_id")
-    .eq("org_id", orgId)
-    .order("name");
-
-  const { data: chairAssignRows } = await supabase
-    .from("jumuiya_chair_assignments")
-    .select("household_id, user_id")
-    .eq("org_id", orgId);
-
-  const assignmentChairByHousehold = new Map<string, string>();
-  for (const row of chairAssignRows ?? []) {
-    const hid = String(row.household_id ?? "");
-    if (!hid || assignmentChairByHousehold.has(hid)) continue;
-    assignmentChairByHousehold.set(hid, String(row.user_id ?? ""));
-  }
-
-  const chairUserIds = new Set<string>();
-  for (const h of householdsForChairs ?? []) {
-    const fromHouse = String(h.chairperson_user_id ?? "").trim();
-    const fromAssign = assignmentChairByHousehold.get(String(h.id)) ?? "";
-    const uid = fromHouse || fromAssign;
-    if (uid) chairUserIds.add(uid);
-  }
-
-  const { data: chairNameProfiles } = chairUserIds.size
-    ? await supabase.from("profiles").select("id, full_name").in("id", Array.from(chairUserIds))
-    : { data: [] };
-  const chairNameById = new Map((chairNameProfiles ?? []).map((p) => [String(p.id), String(p.full_name ?? "")]));
+  const { households, churchElderOptions, jumuiyaChairOptions } =
+    await loadMemberEditFormData(orgId);
 
   const roles = await getMyRoles();
   const allowEditDisplayName = canFinance(roles);
-
-  const jumuiyaChairOptions = (householdsForChairs ?? [])
-    .map((h) => {
-      const fromHouse = String(h.chairperson_user_id ?? "").trim();
-      const fromAssign = assignmentChairByHousehold.get(String(h.id)) ?? "";
-      const userId = fromHouse || fromAssign;
-      if (!userId) return null;
-      return {
-        householdId: String(h.id),
-        userId,
-        fullName: chairNameById.get(userId) ?? "—",
-        jumuiyaLabel: String(h.name ?? ""),
-      };
-    })
-    .filter((x): x is NonNullable<typeof x> => x != null);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -111,8 +51,8 @@ export default async function MemberDetailPage({
         fullName={profile.full_name ?? ""}
         email={member?.email ?? profile.email ?? ""}
         member={member}
-        households={households ?? []}
-        churchElderOptions={churchElderProfiles ?? []}
+        households={households}
+        churchElderOptions={churchElderOptions}
         jumuiyaChairOptions={jumuiyaChairOptions}
         allowEditDisplayName={allowEditDisplayName}
       />

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { canAccessPlatform } from "@/lib/auth/platform-guard";
-import { canAccessRegional, getRegionalEntryPath } from "@/lib/auth/regional-guard";
+import { getRegionalScope } from "@/lib/auth/regional-guard";
 import { getProfile, getSessionUser } from "@/lib/auth/session";
 import { getCurrentParishBranding } from "@/lib/platform/parish-branding";
 import { ThemeToggle } from "./theme-toggle";
@@ -8,42 +8,21 @@ import { SignOutButton } from "./sign-out-button";
 
 /** Self-loading server header — avoids passing auth/branding props across RSC boundaries. */
 export async function DashboardHeader() {
-  let displayName = "Member";
-  let parish: Awaited<ReturnType<typeof getCurrentParishBranding>> = null;
-  let showPlatform = false;
-  let showRegional = false;
-  let regionalHref = "/regional";
+  const [user, parish, showPlatform, regionalScope, profile] = await Promise.all([
+    getSessionUser().catch(() => null),
+    getCurrentParishBranding().catch(() => null),
+    canAccessPlatform().catch(() => false),
+    getRegionalScope().catch(() => null),
+    getProfile().catch(() => null),
+  ]);
 
-  try {
-    const user = await getSessionUser();
-    if (user) {
-      const profile = await getProfile();
-      const fullName = String(profile?.full_name ?? "").trim();
-      const fallbackName = String(user.user_metadata?.full_name ?? "").trim();
-      displayName = fullName || fallbackName || "Member";
-    }
-  } catch {
-    /* Welcome line can fall back to "Member". */
-  }
+  const fullName = String(profile?.full_name ?? "").trim();
+  const fallbackName = String(user?.user_metadata?.full_name ?? "").trim();
+  const displayName = fullName || fallbackName || "Member";
 
-  try {
-    parish = await getCurrentParishBranding();
-  } catch {
-    /* Logo / parish name are optional. */
-  }
-
-  try {
-    showPlatform = await canAccessPlatform();
-  } catch {
-    /* Platform link hidden when MT tables lag. */
-  }
-
-  try {
-    showRegional = await canAccessRegional();
-    if (showRegional) regionalHref = await getRegionalEntryPath();
-  } catch {
-    /* Regional link hidden when officer tables lag. */
-  }
+  const showRegional = regionalScope !== null;
+  const regionalHref =
+    regionalScope?.type === "district" ? "/regional/district" : "/regional/diocese";
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border px-4 md:px-6">

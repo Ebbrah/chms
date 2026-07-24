@@ -27,7 +27,9 @@ export async function requirePlatformAccess() {
 export async function canAccessPlatform(): Promise<boolean> {
   const user = await getSessionUser();
   if (!user) return false;
-  if (await isPlatformAdmin()) return true;
-  const orgIds = await getPlatformParishOperatorOrgIds();
-  return orgIds.length > 0;
+  const [admin, orgIds] = await Promise.all([
+    isPlatformAdmin(),
+    getPlatformParishOperatorOrgIds(),
+  ]);
+  return admin || orgIds.length > 0;
 }

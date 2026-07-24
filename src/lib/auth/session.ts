@@ -148,11 +148,12 @@ export const getProfile = cache(async () => {
     const supabase = await createClient();
     const user = await getSessionUser();
     if (!user) return null;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("profiles")
-      .select("*")
+      .select("id, org_id, full_name, email, phone, context_org_id, avatar_url, sms_opt_in")
       .eq("id", user.id)
       .maybeSingle();
+    if (error) return null;
     return data;
   } catch {
     return null;

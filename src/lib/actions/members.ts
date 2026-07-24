@@ -4,7 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canFinance, isAdmin } from "@/lib/auth/permissions";
-import { getMyRoles } from "@/lib/auth/session";
+import { getMyRoles, getSessionUser } from "@/lib/auth/session";
+import { getResolvedParishOrgId } from "@/lib/members/registration-state";
+import {
+  ensureParishProfile,
+  loadParishProfileRow,
+  resolveEffectiveParishOrgId,
+} from "@/lib/members/ensure-parish-profile";
+import { loadLinkedMemberRow } from "@/lib/members/load-linked-member";
 
 function readText(formData: FormData, key: string) {
   return String(formData.get(key) || "").trim();
@@ -81,18 +88,20 @@ function parseDataUrlImage(
 
 async function orgContext() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return { supabase, user: null, orgId: null as string | null };
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("org_id")
-    .eq("id", user.id)
-    .single();
+  const orgId = await getResolvedParishOrgId();
+  return { supabase, user, orgId };
+}
 
-  return { supabase, user, orgId: profile?.org_id ?? null };
+function registrationAlreadySubmitted(member: {
+  offering_number?: string | null;
+  status?: string | null;
+} | null): boolean {
+  if (!member) return false;
+  if (String(member.offering_number ?? "").trim()) return true;
+  return member.status === "pending_offering_number";
 }
 
 async function linkUnassignedOfferingsByNumber(
@@ -149,7 +158,19 @@ export async function createMember(formData: FormData) {
 /** When user picks a jumuiya on the member form, fill chair + assigned mzee from DB. */
 export async function getHouseholdLeaderIdsForForm(householdId: string) {
   const roles = await getMyRoles();
-  if (!canFinance(roles)) return { error: "Unauthorized" } as const;
+  const isMember = roles.includes("member");
+  if (!canFinance(roles) && !isMember) {
+    const { supabase, user, orgId } = await orgContext();
+    if (!user || !orgId) return { error: "Unauthorized" } as const;
+    const { data: roleRows } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("org_id", orgId)
+      .eq("role", "member")
+      .limit(1);
+    if (!roleRows?.length) return { error: "Unauthorized" } as const;
+  }
   const hid = String(householdId ?? "").trim();
   if (!hid || hid === "__none__") {
     return { chairUserId: "", elderUserId: "" } as const;
@@ -191,48 +212,175 @@ export async function getHouseholdLeaderIdsForForm(householdId: string) {
   } as const;
 }
 
+type MemberUpsertMode = "admin" | "self" | "onboarding";
+
 export async function upsertMemberForUser(userId: string, formData: FormData) {
   try {
-    return await upsertMemberForUserInner(userId, formData);
+    return await upsertMemberForUserInner(userId, formData, "admin");
   } catch (e) {
     console.error("upsertMemberForUser", e);
     return { error: e instanceof Error ? e.message : "Unexpected server error" };
   }
 }
 
-async function upsertMemberForUserInner(userId: string, formData: FormData) {
+/** Members with seed-linked offering numbers may fill profile gaps (not name/email/pledges). */
+export async function updateMyMemberProfile(formData: FormData) {
+  try {
+    const { user, orgId } = await orgContext();
+    if (!user) return { error: "Please sign in again and retry." };
+    if (!orgId) return { error: "Your parish profile is not set up yet. Contact the parish office." };
+    return await upsertMemberForUserInner(user.id, formData, "self");
+  } catch (e) {
+    console.error("updateMyMemberProfile", e);
+    return { error: e instanceof Error ? e.message : "Unexpected server error" };
+  }
+}
+
+/** Second-tier registration for users who signed up without an offering number. */
+export async function completeMemberRegistration(formData: FormData) {
+  try {
+    const { supabase, user, orgId: resolvedOrgId } = await orgContext();
+    if (!user) return { error: "Please sign in again and retry." };
+    if (!resolvedOrgId) {
+      return { error: "Your parish profile is not set up yet. Contact the parish office." };
+    }
+
+    const profile = await loadParishProfileRow(supabase, user.id);
+    const orgId = resolveEffectiveParishOrgId(profile?.org_id, resolvedOrgId);
+    if (!orgId) {
+      return { error: "Your parish profile is not set up yet. Contact the parish office." };
+    }
+
+    const existing = await loadLinkedMemberRow(
+      supabase,
+      user.id,
+      orgId,
+      "id, offering_number, status",
+    );
+    if (registrationAlreadySubmitted(existing)) {
+      return { error: "Registration profile already submitted." };
+    }
+
+    return await upsertMemberForUserInner(user.id, formData, "onboarding");
+  } catch (e) {
+    console.error("completeMemberRegistration", e);
+    return { error: e instanceof Error ? e.message : "Unexpected server error" };
+  }
+}
+
+export async function approvePendingMemberRegistration(memberId: string) {
   const roles = await getMyRoles();
   if (!canFinance(roles)) return { error: "Unauthorized" };
+  const id = String(memberId ?? "").trim();
+  if (!id) return { error: "Missing member id" };
+
+  const { supabase } = await orgContext();
+  const { data: offeringNumber, error } = await supabase.rpc("approve_pending_member_registration", {
+    _member_id: id,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/dashboard/members/pending-registrations");
+  revalidatePath("/dashboard/members");
+  revalidatePath("/dashboard");
+  return { ok: true, offeringNumber: String(offeringNumber ?? "") };
+}
+
+async function upsertMemberForUserInner(
+  userId: string,
+  formData: FormData,
+  mode: MemberUpsertMode,
+) {
+  if (mode === "admin") {
+    const roles = await getMyRoles();
+    if (!canFinance(roles)) return { error: "Unauthorized" };
+  } else {
+    const { user, orgId } = await orgContext();
+    if (!user || user.id !== userId) {
+      return { error: "Please sign in again and retry." };
+    }
+    if (!orgId) {
+      return { error: "Your parish profile is not set up yet. Contact the parish office." };
+    }
+  }
   if (!userId) return { error: "Missing user id" };
 
-  const { supabase, orgId } = await orgContext();
-  if (!orgId) return { error: "Unauthorized" };
+  const context = await orgContext();
+  const { supabase } = context;
+  let orgId = context.orgId;
+  if (!orgId) return { error: "Your parish profile is not set up yet. Contact the parish office." };
 
-  const { data: profileUser } = await supabase
-    .from("profiles")
-    .select("id, org_id, full_name, email")
-    .eq("id", userId)
-    .single();
+  const sessionUser = await getSessionUser();
+  let profileUser = await loadParishProfileRow(supabase, userId);
+  if (!profileUser?.id && sessionUser?.id === userId) {
+    profileUser = await ensureParishProfile(supabase, sessionUser, orgId);
+  }
 
-  if (!profileUser?.org_id || profileUser.org_id !== orgId) {
+  if (!profileUser?.id) {
     return { error: "User profile not found in your organization" };
   }
 
+  orgId = resolveEffectiveParishOrgId(profileUser.org_id, orgId);
+  if (!orgId) {
+    return { error: "Your parish profile is not set up yet. Contact the parish office." };
+  }
+
+  if (!String(profileUser.org_id ?? "").trim()) {
+    const { error: profileOrgError } = await supabase
+      .from("profiles")
+      .update({ org_id: orgId })
+      .eq("id", userId);
+    if (profileOrgError) {
+      return { error: "Could not link your profile to the parish. Contact the parish office." };
+    }
+    profileUser = { ...profileUser, org_id: orgId };
+  }
+
+  const existing = await loadLinkedMemberRow(
+    supabase,
+    userId,
+    orgId,
+    "id, member_details, offering_number, household_id, join_date, email, phone, address, notes, pastoral_notes, status",
+  );
+
+  if (mode === "self") {
+    if (!existing?.id) return { error: "Member record not found. Complete registration first." };
+  }
+
+  if (mode === "onboarding" && registrationAlreadySubmitted(existing)) {
+    return { error: "Registration profile already submitted." };
+  }
+
   const submittedDisplayName = readText(formData, "full_name");
-  const resolvedDisplayName =
-    submittedDisplayName.trim() ||
+  const profileDisplayName =
     String(profileUser.full_name ?? "").trim() ||
     String(profileUser.email ?? "").split("@")[0] ||
     "Member";
+  const resolvedDisplayName =
+    mode === "self" || mode === "onboarding"
+      ? profileDisplayName
+      : submittedDisplayName.trim() || profileDisplayName;
 
   const household_id = readNullable(formData, "household_id");
   const join_date = readNullable(formData, "join_date");
-  const email = readNullable(formData, "email") ?? profileUser.email ?? null;
+  const email =
+    mode === "self" || mode === "onboarding"
+      ? profileUser.email ?? null
+      : readNullable(formData, "email") ?? profileUser.email ?? null;
   const phone = readNullable(formData, "phone");
   const address = readNullable(formData, "address");
   const notes = readNullable(formData, "notes");
-  const pastoral_notes = readNullable(formData, "pastoral_notes");
-  const status = readText(formData, "status") || "active";
+  const pastoral_notes =
+    mode === "self" ? String(existing?.pastoral_notes ?? "") || null : readNullable(formData, "pastoral_notes");
+  const existingOfferingNumber = String(existing?.offering_number ?? "").trim();
+  const status =
+    mode === "onboarding"
+      ? "pending_offering_number"
+      : mode === "self"
+        ? existingOfferingNumber
+          ? String(existing?.status ?? "active")
+          : "pending_offering_number"
+        : readText(formData, "status") || "active";
   const gender = readText(formData, "gender");
   const birthDate = readText(formData, "birth_date");
 
@@ -261,20 +409,13 @@ async function upsertMemberForUserInner(userId: string, formData: FormData) {
     jumuiya_chairperson = String(cp?.full_name ?? "").trim();
   }
 
-  const { data: existing } = await supabase
-    .from("members")
-    .select(
-      "id, member_details, offering_number, household_id, join_date, email, phone, address, notes, pastoral_notes, status",
-    )
-    .eq("user_id", userId)
-    .eq("org_id", orgId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  // Offering number is managed by seed loading / controlled flows, not freeform profile edits.
+  // Offering number is managed by seed loading / approval flows, not freeform profile edits.
   const offering_number =
-    existing?.offering_number != null ? String(existing.offering_number).trim() || null : null;
+    mode === "onboarding"
+      ? null
+      : existing?.offering_number != null
+        ? String(existing.offering_number).trim() || null
+        : null;
 
   let passportPhotoPath: string | undefined;
   let passportPhotoUrl: string | undefined;
@@ -316,17 +457,28 @@ async function upsertMemberForUserInner(userId: string, formData: FormData) {
     ...detailsWithoutPhotoData,
     passport_photo_path: passportPhotoPath,
     passport_photo_url: passportPhotoUrl,
-    full_name: resolvedDisplayName,
+    full_name:
+      mode === "self"
+        ? String(oldDetails.full_name ?? profileUser.full_name ?? resolvedDisplayName)
+        : resolvedDisplayName,
     gender,
     birth_date: birthDate,
     church_elder_name,
     church_elder_user_id: churchElderUserId ?? "",
     jumuiya_chairperson,
     jumuiya_chairperson_user_id: jumuiyaChairUserId ?? "",
-    // Pledge values are controlled by seed load and should not change from member edit page.
-    pledge_1: String(oldDetails.pledge_1 ?? detailsWithoutPhotoData.pledge_1 ?? "").trim(),
-    pledge_2: String(oldDetails.pledge_2 ?? detailsWithoutPhotoData.pledge_2 ?? "").trim(),
-    pledge_3: String(oldDetails.pledge_3 ?? detailsWithoutPhotoData.pledge_3 ?? "").trim(),
+    pledge_1:
+      mode === "onboarding"
+        ? readText(formData, "pledge_1")
+        : String(oldDetails.pledge_1 ?? detailsWithoutPhotoData.pledge_1 ?? "").trim(),
+    pledge_2:
+      mode === "onboarding"
+        ? readText(formData, "pledge_2")
+        : String(oldDetails.pledge_2 ?? detailsWithoutPhotoData.pledge_2 ?? "").trim(),
+    pledge_3:
+      mode === "onboarding"
+        ? readText(formData, "pledge_3")
+        : String(oldDetails.pledge_3 ?? detailsWithoutPhotoData.pledge_3 ?? "").trim(),
   };
 
   const memberDetailsJson = JSON.parse(JSON.stringify(nextMemberDetails)) as Record<string, unknown>;
@@ -375,27 +527,50 @@ async function upsertMemberForUserInner(userId: string, formData: FormData) {
     return { error: error.message };
   }
 
-  const { error: profileNameErr } = await supabase
-    .from("profiles")
-    .update({ full_name: resolvedDisplayName })
-    .eq("id", userId)
-    .eq("org_id", orgId);
-  if (profileNameErr) return { error: profileNameErr.message };
+  if (mode === "admin") {
+    const profileUpdate: { full_name: string; phone?: string | null } = {
+      full_name: resolvedDisplayName,
+    };
+    if (phone) profileUpdate.phone = phone;
+    const { error: profileNameErr } = await supabase
+      .from("profiles")
+      .update(profileUpdate)
+      .eq("id", userId)
+      .eq("org_id", orgId);
+    if (profileNameErr) return { error: profileNameErr.message };
+  } else if (phone) {
+    const { error: profilePhoneErr } = await supabase
+      .from("profiles")
+      .update({ phone })
+      .eq("id", userId);
+    if (profilePhoneErr && mode !== "onboarding") {
+      return { error: profilePhoneErr.message };
+    }
+  }
 
-  try {
-    await linkUnassignedOfferingsByNumber(
-      supabase,
-      orgId,
-      String(savedMember?.id ?? existing?.id ?? ""),
-      offering_number,
-    );
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not auto-link prior offerings" };
+  if (offering_number) {
+    try {
+      await linkUnassignedOfferingsByNumber(
+        supabase,
+        orgId,
+        String(savedMember?.id ?? existing?.id ?? ""),
+        offering_number,
+      );
+    } catch (e) {
+      if (mode !== "onboarding" && mode !== "self") {
+        return { error: e instanceof Error ? e.message : "Could not auto-link prior offerings" };
+      }
+      console.warn("linkUnassignedOfferingsByNumber", e);
+    }
   }
 
   revalidatePath("/dashboard/members");
   revalidatePath("/dashboard/members/cards");
+  revalidatePath("/dashboard/members/pending-registrations");
   revalidatePath(`/dashboard/members/${userId}`);
+  revalidatePath("/dashboard/my-profile");
+  revalidatePath("/dashboard/my-profile/edit");
+  revalidatePath("/dashboard/complete-registration");
   revalidatePath("/dashboard");
   return { ok: true };
 }
