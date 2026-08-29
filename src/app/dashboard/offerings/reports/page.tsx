@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatAmountTZS } from "@/lib/format/amount";
+import { offeringBatchSlotLabel } from "@/lib/offering/weekly";
 import { OfferingReportToolbar } from "./offering-report-toolbar";
 
 function normType(name: string | undefined) {
@@ -56,11 +57,48 @@ export default async function OfferingReportsPage({
   const { label, start, end } = getReportRange(sp);
   const startIso = start.toISOString();
   const endIso = end.toISOString();
+  const reportRange = sp.range || "annual";
+  const showAttendanceSummary = reportRange === "weekly" || reportRange === "monthly";
+  const startDate = start.toISOString().slice(0, 10);
+  const endDate = end.toISOString().slice(0, 10);
   const parsedPage = Number(sp.page ?? "1");
   const page = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1;
   const pageSize = 50;
 
   const supabase = await createClient();
+
+  const { data: attendanceBatches } = showAttendanceSummary
+    ? await supabase
+        .from("offering_week_batches")
+        .select(
+          "week_start_date, week_end_date, batch_slot, men_attendance_count, women_attendance_count, sunday_school_children_count, status",
+        )
+        .in("batch_slot", [1, 2])
+        .lte("week_start_date", endDate)
+        .gte("week_end_date", startDate)
+        .order("week_start_date", { ascending: true })
+        .order("batch_slot", { ascending: true })
+    : { data: [] };
+
+  const attendanceRows = (attendanceBatches ?? []).map((b) => ({
+    weekLabel: `${String(b.week_start_date)} → ${String(b.week_end_date)}`,
+    batchLabel: offeringBatchSlotLabel(Number(b.batch_slot ?? 1)),
+    men: b.men_attendance_count != null ? Number(b.men_attendance_count) : null,
+    women: b.women_attendance_count != null ? Number(b.women_attendance_count) : null,
+    children:
+      b.sunday_school_children_count != null ? Number(b.sunday_school_children_count) : null,
+    status: String(b.status ?? ""),
+  }));
+
+  const attendanceTotals = attendanceRows.reduce(
+    (acc, row) => {
+      if (row.men != null) acc.men += row.men;
+      if (row.women != null) acc.women += row.women;
+      if (row.children != null) acc.children += row.children;
+      return acc;
+    },
+    { men: 0, women: 0, children: 0 },
+  );
 
   const { data: members } = await supabase
     .from("members")
@@ -139,6 +177,73 @@ export default async function OfferingReportsPage({
       <Suspense fallback={<div className="h-20 animate-pulse rounded-md bg-muted" />}>
         <OfferingReportToolbar />
       </Suspense>
+
+      {showAttendanceSummary ? (
+        <div className="space-y-3 rounded-md border border-border p-4">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Mahudhurio (Attendance)</h2>
+            <p className="text-sm text-muted-foreground">
+              Sunday service batches 1 &amp; 2 — {label}
+            </p>
+          </div>
+          <div className="max-h-[40vh] overflow-auto rounded-md border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Church week</TableHead>
+                  <TableHead>Batch</TableHead>
+                  <TableHead className="text-right">Wanaume</TableHead>
+                  <TableHead className="text-right">Wanawake</TableHead>
+                  <TableHead className="text-right">Watoto (Shule ya Jumapili)</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {attendanceRows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
+                      No attendance recorded for this period.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {attendanceRows.map((row, idx) => (
+                      <TableRow key={`${row.weekLabel}-${row.batchLabel}-${idx}`}>
+                        <TableCell>{row.weekLabel}</TableCell>
+                        <TableCell>{row.batchLabel}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.men != null ? row.men.toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.women != null ? row.women.toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {row.children != null ? row.children.toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell>{row.status.replaceAll("_", " ")}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow>
+                      <TableCell className="font-semibold">Total</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {attendanceTotals.men.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {attendanceTotals.women.toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {attendanceTotals.children.toLocaleString()}
+                      </TableCell>
+                      <TableCell>—</TableCell>
+                    </TableRow>
+                  </>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="max-h-[70vh] overflow-auto rounded-md border border-border">
         <Table>

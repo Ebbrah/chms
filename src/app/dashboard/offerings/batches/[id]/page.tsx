@@ -26,14 +26,18 @@ export default async function OfferingBatchDetailPage({
 
   const { data: batch } = await supabase
     .from("offering_week_batches")
-    .select("id, org_id, week_start_date, week_end_date, status, created_at, affected_rows, batch_slot")
+    .select(
+      "id, org_id, week_start_date, week_end_date, status, created_at, affected_rows, batch_slot, men_attendance_count, women_attendance_count, sunday_school_children_count",
+    )
     .eq("id", id)
     .single();
   if (!batch) notFound();
 
   const { data: weekBatches } = await supabase
     .from("offering_week_batches")
-    .select("id, batch_slot")
+    .select(
+      "id, batch_slot, men_attendance_count, women_attendance_count, sunday_school_children_count",
+    )
     .eq("org_id", batch.org_id)
     .eq("week_start_date", batch.week_start_date)
     .eq("week_end_date", batch.week_end_date);
@@ -43,6 +47,30 @@ export default async function OfferingBatchDetailPage({
   const idToSlot = new Map(
     batchList.map((b) => [String(b.id), Number((b as { batch_slot?: number }).batch_slot ?? 1)]),
   );
+  const attendanceBySlot = new Map<
+    number,
+    { men: number | null; women: number | null; children: number | null }
+  >();
+  for (const b of batchList) {
+    const slot = Number((b as { batch_slot?: number }).batch_slot ?? 1);
+    attendanceBySlot.set(slot, {
+      men:
+        (b as { men_attendance_count?: number | null }).men_attendance_count != null
+          ? Number((b as { men_attendance_count?: number | null }).men_attendance_count)
+          : null,
+      women:
+        (b as { women_attendance_count?: number | null }).women_attendance_count != null
+          ? Number((b as { women_attendance_count?: number | null }).women_attendance_count)
+          : null,
+      children:
+        (b as { sunday_school_children_count?: number | null }).sunday_school_children_count !=
+        null
+          ? Number(
+              (b as { sunday_school_children_count?: number | null }).sunday_school_children_count,
+            )
+          : null,
+    });
+  }
 
   const totalByBatchSlot = new Map<number, number>();
 
@@ -194,6 +222,17 @@ export default async function OfferingBatchDetailPage({
   const envelopePageHref = (nextPage: number) =>
     `/dashboard/offerings/batches/${id}?envelopePage=${nextPage}`;
 
+  const batchSlot = Number((batch as { batch_slot?: number }).batch_slot ?? 1);
+  const showAttendance = batchSlot === 1 || batchSlot === 2;
+  const menAttendance =
+    batch.men_attendance_count != null ? Number(batch.men_attendance_count) : null;
+  const womenAttendance =
+    batch.women_attendance_count != null ? Number(batch.women_attendance_count) : null;
+  const sundaySchoolChildren =
+    batch.sunday_school_children_count != null
+      ? Number(batch.sunday_school_children_count)
+      : null;
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
@@ -203,6 +242,34 @@ export default async function OfferingBatchDetailPage({
         <ButtonLink href="/dashboard/offerings">Back to offerings</ButtonLink>
       </div>
 
+      {showAttendance ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Mahudhurio (Attendance)</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-col gap-1 rounded-md border border-border px-4 py-3">
+              <span className="text-muted-foreground">Wanaume</span>
+              <span className="text-2xl font-semibold tabular-nums">
+                {menAttendance != null ? menAttendance.toLocaleString() : "—"}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 rounded-md border border-border px-4 py-3">
+              <span className="text-muted-foreground">Wanawake</span>
+              <span className="text-2xl font-semibold tabular-nums">
+                {womenAttendance != null ? womenAttendance.toLocaleString() : "—"}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 rounded-md border border-border px-4 py-3">
+              <span className="text-muted-foreground">Watoto (Shule ya Jumapili)</span>
+              <span className="text-2xl font-semibold tabular-nums">
+                {sundaySchoolChildren != null ? sundaySchoolChildren.toLocaleString() : "—"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Weekly offering totals</CardTitle>
@@ -211,17 +278,31 @@ export default async function OfferingBatchDetailPage({
           {weekBatchTotals.length === 0 ? (
             <p className="text-muted-foreground">Hakuna matoleo yaliyorekodiwa kwa wiki hii bado.</p>
           ) : (
-            weekBatchTotals.map(({ batchSeq, total }) => (
+            weekBatchTotals.map(({ batchSeq, total }) => {
+              const attendance = attendanceBySlot.get(batchSeq);
+              const showSlotAttendance = batchSeq === 1 || batchSeq === 2;
+              return (
               <div
                 key={batchSeq}
                 className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between"
               >
-                <span className="font-medium text-foreground">
-                  Batch {batchSeq} ({offeringBatchSlotLabel(batchSeq)})
-                </span>
+                <div className="space-y-0.5">
+                  <span className="font-medium text-foreground">
+                    Batch {batchSeq} ({offeringBatchSlotLabel(batchSeq)})
+                  </span>
+                  {showSlotAttendance && attendance ? (
+                    <p className="text-xs text-muted-foreground">
+                      Wanaume: {attendance.men != null ? attendance.men.toLocaleString() : "—"} ·
+                      Wanawake: {attendance.women != null ? attendance.women.toLocaleString() : "—"} ·
+                      Shule ya Jumapili:{" "}
+                      {attendance.children != null ? attendance.children.toLocaleString() : "—"}
+                    </p>
+                  ) : null}
+                </div>
                 <span className="font-semibold tabular-nums">{formatAmountTZS(total)}</span>
               </div>
-            ))
+              );
+            })
           )}
           <div className="border-t pt-3">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">

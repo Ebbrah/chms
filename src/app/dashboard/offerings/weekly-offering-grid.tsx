@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import ExcelJS from "exceljs";
-import { saveWeeklyOfferingBatch } from "@/lib/actions/weekly-offerings";
+import {
+  getBatchServiceAttendance,
+  saveBatchServiceAttendance,
+  saveWeeklyOfferingBatch,
+} from "@/lib/actions/weekly-offerings";
 import {
   formatDateISO,
   OFFERING_BATCH_SLOT_FIRST_SERVICE,
@@ -81,6 +85,71 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
   const [pending, setPending] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [batchSlot, setBatchSlot] = useState(OFFERING_BATCH_SLOT_FIRST_SERVICE);
+  const [menAttendance, setMenAttendance] = useState("");
+  const [womenAttendance, setWomenAttendance] = useState("");
+  const [sundaySchoolChildren, setSundaySchoolChildren] = useState("");
+  const [attendanceEditable, setAttendanceEditable] = useState(true);
+  const [attendancePending, setAttendancePending] = useState(false);
+
+  const showSundayAttendance =
+    batchSlot === OFFERING_BATCH_SLOT_FIRST_SERVICE ||
+    batchSlot === OFFERING_BATCH_SLOT_SECOND_SERVICE;
+
+  useEffect(() => {
+    if (!showSundayAttendance) {
+      setMenAttendance("");
+      setWomenAttendance("");
+      setSundaySchoolChildren("");
+      setAttendanceEditable(true);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const res = await getBatchServiceAttendance(weekOf, batchSlot);
+      if (cancelled) return;
+      if ("error" in res && res.error) return;
+      if ("menAttendance" in res) {
+        setMenAttendance(res.menAttendance != null ? String(res.menAttendance) : "");
+        setWomenAttendance(res.womenAttendance != null ? String(res.womenAttendance) : "");
+        setSundaySchoolChildren(
+          res.sundaySchoolChildren != null ? String(res.sundaySchoolChildren) : "",
+        );
+        setAttendanceEditable(res.editable !== false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [weekOf, batchSlot, showSundayAttendance]);
+
+  function attendancePayload() {
+    return {
+      menAttendance: menAttendance.trim() === "" ? null : Number(menAttendance),
+      womenAttendance: womenAttendance.trim() === "" ? null : Number(womenAttendance),
+      sundaySchoolChildren:
+        sundaySchoolChildren.trim() === "" ? null : Number(sundaySchoolChildren),
+    };
+  }
+
+  async function onSaveAttendanceOnly() {
+    if (attendancePending || !showSundayAttendance) return;
+    setMsg(null);
+    setErr(null);
+    setAttendancePending(true);
+    try {
+      const res = await saveBatchServiceAttendance(weekOf, batchSlot, attendancePayload());
+      if ("error" in res && res.error) {
+        setErr(res.error);
+        return;
+      }
+      setMsg("Mahudhurio yamehifadhiwa.");
+      router.refresh();
+    } finally {
+      setAttendancePending(false);
+    }
+  }
 
   function updateRow(i: number, patch: Partial<RowState>) {
     setRows((prev) => {
@@ -102,7 +171,7 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
         jengo: parseAmountInput(r.jengo),
         maendeleo: parseAmountInput(r.maendeleo),
       }));
-      const res = await saveWeeklyOfferingBatch(weekOf, payload, batchSlot);
+      const res = await saveWeeklyOfferingBatch(weekOf, payload, batchSlot, attendancePayload());
       if ("error" in res && res.error) {
         setErr(res.error);
         return;
@@ -279,6 +348,76 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
           />
         </div>
       </div>
+
+      {showSundayAttendance ? (
+        <div className="rounded-md border border-border bg-muted/20 p-4">
+          <p className="mb-3 text-sm font-medium">Mahudhurio (Attendance)</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-2">
+              <Label htmlFor="men-attendance">Wanaume</Label>
+              <Input
+                id="men-attendance"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                value={menAttendance}
+                onChange={(e) => setMenAttendance(e.target.value)}
+                placeholder="0"
+                disabled={!attendanceEditable}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="women-attendance">Wanawake</Label>
+              <Input
+                id="women-attendance"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                value={womenAttendance}
+                onChange={(e) => setWomenAttendance(e.target.value)}
+                placeholder="0"
+                disabled={!attendanceEditable}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sunday-school-attendance">
+                Watoto (Shule ya Jumapili)
+              </Label>
+              <Input
+                id="sunday-school-attendance"
+                type="number"
+                min={0}
+                step={1}
+                inputMode="numeric"
+                value={sundaySchoolChildren}
+                onChange={(e) => setSundaySchoolChildren(e.target.value)}
+                placeholder="0"
+                disabled={!attendanceEditable}
+              />
+            </div>
+            <div className="flex items-end">
+              <ActionButton
+                type="button"
+                variant="outline"
+                onClick={() => void onSaveAttendanceOnly()}
+                loading={attendancePending}
+                loadingText="Saving…"
+                disabled={!attendanceEditable}
+              >
+                Hifadhi mahudhurio
+              </ActionButton>
+            </div>
+          </div>
+          {!attendanceEditable ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Batch hii imeidhinishwa — mahudhurio hayawezi kubadilishwa.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {msg ? <p className="text-sm text-muted-foreground">{msg}</p> : null}
       {err ? <p className="text-sm text-destructive">{err}</p> : null}
 
