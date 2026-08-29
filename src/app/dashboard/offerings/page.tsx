@@ -151,18 +151,10 @@ export default async function OfferingsPage({
     .order("created_at", { ascending: false })
     .range(batchFrom, batchTo);
 
-  const [{ data: offeringTypesRaw }, { data: otherPledgeTitleRows }] = await Promise.all([
-    supabase.from("offering_types").select("id,name").order("name"),
-    supabase.from("member_other_pledges").select("title").order("title").limit(1000),
-  ]);
-
-  const recordedPledgeTitles = Array.from(
-    new Set(
-      (otherPledgeTitleRows ?? [])
-        .map((r) => String(r.title ?? "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const { data: offeringTypesRaw } = await supabase
+    .from("offering_types")
+    .select("id,name")
+    .order("name");
 
   const selectedRegisteredBatchId = requestedRegisteredBatchId || String(batches?.[0]?.id ?? "");
   const { data: offerings } = selectedRegisteredBatchId
@@ -580,7 +572,7 @@ export default async function OfferingsPage({
           <CardContent>
             <OtherPledgesForm
               defaultBatchSlot={isSunday ? OFFERING_BATCH_SLOT_FIRST_SERVICE : OFFERING_BATCH_SLOT_MIDWEEK}
-              recordedPledgeTitles={recordedPledgeTitles}
+              offeringTypes={collectiveOfferingTypes}
             />
           </CardContent>
         </Card>

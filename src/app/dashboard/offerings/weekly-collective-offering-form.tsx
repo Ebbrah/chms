@@ -55,13 +55,9 @@ export function WeeklyCollectiveOfferingForm({
       }
       setMsg("Collective offering saved.");
       setAmount("");
-      if ("batchId" in res && res.batchId) {
-        router.push(
-          `/dashboard/offerings?registeredBatchId=${encodeURIComponent(String(res.batchId))}&collectivePage=1#other-offerings-preview`,
-        );
-      } else {
-        router.refresh();
-      }
+      setOfferingTypeId("");
+      // Refresh tables in the background without navigating away from the form.
+      router.refresh();
     } finally {
       setPending(false);
     }

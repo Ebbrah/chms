@@ -85,10 +85,12 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
   const [pending, setPending] = useState(false);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [batchSlot, setBatchSlot] = useState(OFFERING_BATCH_SLOT_FIRST_SERVICE);
-  const [menAttendance, setMenAttendance] = useState("");
-  const [womenAttendance, setWomenAttendance] = useState("");
-  const [sundaySchoolChildren, setSundaySchoolChildren] = useState("");
+  const [serviceLeader, setServiceLeader] = useState("");
+  const [preacher, setPreacher] = useState("");
+  const [adultsAttendance, setAdultsAttendance] = useState("");
+  const [childrenAttendance, setChildrenAttendance] = useState("");
   const [attendanceEditable, setAttendanceEditable] = useState(true);
+  const [attendanceApproved, setAttendanceApproved] = useState(false);
   const [attendancePending, setAttendancePending] = useState(false);
 
   const showSundayAttendance =
@@ -97,10 +99,12 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
 
   useEffect(() => {
     if (!showSundayAttendance) {
-      setMenAttendance("");
-      setWomenAttendance("");
-      setSundaySchoolChildren("");
+      setServiceLeader("");
+      setPreacher("");
+      setAdultsAttendance("");
+      setChildrenAttendance("");
       setAttendanceEditable(true);
+      setAttendanceApproved(false);
       return;
     }
 
@@ -109,13 +113,17 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
       const res = await getBatchServiceAttendance(weekOf, batchSlot);
       if (cancelled) return;
       if ("error" in res && res.error) return;
-      if ("menAttendance" in res) {
-        setMenAttendance(res.menAttendance != null ? String(res.menAttendance) : "");
-        setWomenAttendance(res.womenAttendance != null ? String(res.womenAttendance) : "");
-        setSundaySchoolChildren(
-          res.sundaySchoolChildren != null ? String(res.sundaySchoolChildren) : "",
+      if ("serviceLeader" in res) {
+        setServiceLeader(res.serviceLeader ?? "");
+        setPreacher(res.preacher ?? "");
+        setAdultsAttendance(
+          res.adultsAttendance != null ? String(res.adultsAttendance) : "",
+        );
+        setChildrenAttendance(
+          res.childrenAttendance != null ? String(res.childrenAttendance) : "",
         );
         setAttendanceEditable(res.editable !== false);
+        setAttendanceApproved(res.approved === true);
       }
     })();
 
@@ -126,10 +134,10 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
 
   function attendancePayload() {
     return {
-      menAttendance: menAttendance.trim() === "" ? null : Number(menAttendance),
-      womenAttendance: womenAttendance.trim() === "" ? null : Number(womenAttendance),
-      sundaySchoolChildren:
-        sundaySchoolChildren.trim() === "" ? null : Number(sundaySchoolChildren),
+      serviceLeader: serviceLeader.trim() || null,
+      preacher: preacher.trim() || null,
+      adultsAttendance: adultsAttendance.trim() === "" ? null : Number(adultsAttendance),
+      childrenAttendance: childrenAttendance.trim() === "" ? null : Number(childrenAttendance),
     };
   }
 
@@ -144,7 +152,7 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
         setErr(res.error);
         return;
       }
-      setMsg("Mahudhurio yamehifadhiwa.");
+      setMsg("Taarifa za ibada zimehifadhiwa.");
       router.refresh();
     } finally {
       setAttendancePending(false);
@@ -351,68 +359,77 @@ export function WeeklyOfferingGrid({ defaultWeekOf }: { defaultWeekOf?: string }
 
       {showSundayAttendance ? (
         <div className="rounded-md border border-border bg-muted/20 p-4">
-          <p className="mb-3 text-sm font-medium">Mahudhurio (Attendance)</p>
+          <p className="mb-3 text-sm font-medium">Taarifa za Ibada</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="grid gap-2">
-              <Label htmlFor="men-attendance">Wanaume</Label>
+              <Label htmlFor="service-leader">Kiongozi wa Ibada</Label>
               <Input
-                id="men-attendance"
+                id="service-leader"
+                type="text"
+                value={serviceLeader}
+                onChange={(e) => setServiceLeader(e.target.value)}
+                disabled={!attendanceEditable}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="preacher">Mhubiri</Label>
+              <Input
+                id="preacher"
+                type="text"
+                value={preacher}
+                onChange={(e) => setPreacher(e.target.value)}
+                disabled={!attendanceEditable}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="adults-attendance">Mahudhurio watu wazima</Label>
+              <Input
+                id="adults-attendance"
                 type="number"
                 min={0}
                 step={1}
                 inputMode="numeric"
-                value={menAttendance}
-                onChange={(e) => setMenAttendance(e.target.value)}
+                value={adultsAttendance}
+                onChange={(e) => setAdultsAttendance(e.target.value)}
                 placeholder="0"
                 disabled={!attendanceEditable}
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="women-attendance">Wanawake</Label>
+              <Label htmlFor="children-attendance">Mahudhurio watoto</Label>
               <Input
-                id="women-attendance"
+                id="children-attendance"
                 type="number"
                 min={0}
                 step={1}
                 inputMode="numeric"
-                value={womenAttendance}
-                onChange={(e) => setWomenAttendance(e.target.value)}
+                value={childrenAttendance}
+                onChange={(e) => setChildrenAttendance(e.target.value)}
                 placeholder="0"
                 disabled={!attendanceEditable}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="sunday-school-attendance">
-                Watoto (Shule ya Jumapili)
-              </Label>
-              <Input
-                id="sunday-school-attendance"
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={sundaySchoolChildren}
-                onChange={(e) => setSundaySchoolChildren(e.target.value)}
-                placeholder="0"
-                disabled={!attendanceEditable}
-              />
-            </div>
-            <div className="flex items-end">
-              <ActionButton
-                type="button"
-                variant="outline"
-                onClick={() => void onSaveAttendanceOnly()}
-                loading={attendancePending}
-                loadingText="Saving…"
-                disabled={!attendanceEditable}
-              >
-                Hifadhi mahudhurio
-              </ActionButton>
-            </div>
+            {attendanceEditable && !attendanceApproved ? (
+              <div className="flex items-end sm:col-span-2 lg:col-span-4">
+                <ActionButton
+                  type="button"
+                  variant="outline"
+                  onClick={() => void onSaveAttendanceOnly()}
+                  loading={attendancePending}
+                  loadingText="Saving…"
+                >
+                  Hifadhi taarifa za ibada
+                </ActionButton>
+              </div>
+            ) : null}
           </div>
-          {!attendanceEditable ? (
+          {attendanceApproved ? (
             <p className="mt-2 text-xs text-muted-foreground">
-              Batch hii imeidhinishwa — mahudhurio hayawezi kubadilishwa.
+              Batch hii imeidhinishwa — taarifa za ibada haziwezi kubadilishwa.
+            </p>
+          ) : !attendanceEditable ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Batch hii imewekwa idhini — taarifa za ibada haziwezi kubadilishwa.
             </p>
           ) : null}
         </div>

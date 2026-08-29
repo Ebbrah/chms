@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { recordMemberOtherPledge, searchMembersByOfferingNumber } from "@/lib/actions/member-pledges";
+import {
+  lookupMemberByExactOfferingNumber,
+  recordMemberOtherPledge,
+  type OfferingNumberLookupRow,
+} from "@/lib/actions/member-pledges";
 import {
   OFFERING_BATCH_SLOT_FIRST_SERVICE,
   OFFERING_BATCH_SLOT_MIDWEEK,
@@ -10,7 +14,6 @@ import {
   offeringBatchSlotLabel,
 } from "@/lib/offering/weekly";
 import { ActionButton } from "@/components/ui/action-button";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
@@ -18,34 +21,24 @@ import { parseAmountInput } from "@/lib/format/currency-input";
 import { toDisplayCaps } from "@/lib/format/name";
 import { Label } from "@/components/ui/label";
 
-type Hit = {
-  memberId: string | null;
-  offeringNumber: string;
-  fullName: string;
-  phone: string;
-  source: "member" | "seed";
-};
+const LOOKUP_DEBOUNCE_MS = 350;
 
-const SEARCH_DEBOUNCE_MS = 350;
+type OfferingTypeOption = { id: string; name: string };
 
 export function OtherPledgesForm({
   defaultBatchSlot = OFFERING_BATCH_SLOT_MIDWEEK,
-  recordedPledgeTitles = [],
+  offeringTypes = [],
 }: {
   defaultBatchSlot?: number;
-  /** Distinct ahadi / sadaka names already recorded in this parish. */
-  recordedPledgeTitles?: string[];
+  offeringTypes?: OfferingTypeOption[];
 }) {
   const router = useRouter();
   const [batchSlot, setBatchSlot] = useState(defaultBatchSlot);
   const [noOfferingNumber, setNoOfferingNumber] = useState(false);
-  const [search, setSearch] = useState("");
-  const [hits, setHits] = useState<Hit[]>([]);
-  const [selected, setSelected] = useState<Hit | null>(null);
+  const [offeringNumber, setOfferingNumber] = useState("");
+  const [lookup, setLookup] = useState<OfferingNumberLookupRow | null>(null);
   const [pledgeDate, setPledgeDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [title, setTitle] = useState("");
-  const [customTitle, setCustomTitle] = useState("");
-  const [useCustomTitle, setUseCustomTitle] = useState(false);
+  const [offeringTypeName, setOfferingTypeName] = useState("");
   const [amount, setAmount] = useState("");
   const [paidAmount, setPaidAmount] = useState("");
   const [manualFullName, setManualFullName] = useState("");
@@ -54,58 +47,57 @@ export function OtherPledgesForm({
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [searching, setSearching] = useState(false);
-  const [lastSearchQuery, setLastSearchQuery] = useState("");
-  const searchSeq = useRef(0);
+  const lookupSeq = useRef(0);
+
+  const displayName = noOfferingNumber
+    ? manualFullName
+    : lookup
+      ? toDisplayCaps(lookup.fullName)
+      : "";
+  const displayPhone = noOfferingNumber ? manualPhone : (lookup?.phone ?? "");
+  const displayJumuiya = noOfferingNumber ? manualJumuiya : (lookup?.jumuiyaName ?? "");
+
+  const runOfferingLookup = useCallback(async (query: string) => {
+    const q = query.trim();
+    if (noOfferingNumber || !q) {
+      setLookup(null);
+      return;
+    }
+
+    const seq = ++lookupSeq.current;
+    setErr(null);
+    const res = await lookupMemberByExactOfferingNumber(q);
+    if (seq !== lookupSeq.current) return;
+    if ("error" in res && res.error) {
+      setErr(res.error);
+      setLookup(null);
+      return;
+    }
+    if ("found" in res && res.found && res.row) {
+      setLookup(res.row);
+      setOfferingNumber(res.row.offeringNumber);
+    } else {
+      setLookup(null);
+    }
+  }, [noOfferingNumber]);
 
   useEffect(() => {
     if (noOfferingNumber) {
-      setHits([]);
-      setLastSearchQuery("");
-      setSearching(false);
+      setLookup(null);
       return;
     }
-    const q = search.trim();
-    if (q.length < 1) {
-      setHits([]);
-      setLastSearchQuery("");
-      setSearching(false);
+    const q = offeringNumber.trim();
+    if (!q) {
+      setLookup(null);
       return;
     }
 
     const handle = window.setTimeout(() => {
-      const seq = ++searchSeq.current;
-      setSearching(true);
-      setErr(null);
-      void (async () => {
-        try {
-          const res = await searchMembersByOfferingNumber(q);
-          if (seq !== searchSeq.current) return;
-          if ("error" in res && res.error) {
-            setErr(res.error);
-            setHits([]);
-            setLastSearchQuery(q);
-            return;
-          }
-          setHits("rows" in res ? (res.rows ?? []) : []);
-          setLastSearchQuery(q);
-        } finally {
-          if (seq === searchSeq.current) setSearching(false);
-        }
-      })();
-    }, SEARCH_DEBOUNCE_MS);
+      void runOfferingLookup(q);
+    }, LOOKUP_DEBOUNCE_MS);
 
     return () => window.clearTimeout(handle);
-  }, [search, noOfferingNumber]);
-
-  function pickMember(h: Hit) {
-    if (noOfferingNumber) return;
-    setSelected(h);
-    setHits([]);
-    setSearch("");
-    setLastSearchQuery("");
-    setErr(null);
-  }
+  }, [offeringNumber, noOfferingNumber, runOfferingLookup]);
 
   async function onSave() {
     if (pending) return;
@@ -116,26 +108,35 @@ export function OtherPledgesForm({
         setErr("Andika jina kamili kwa asiye na namba ya sadaka.");
         return;
       }
-    } else if (!selected) {
-      setErr("Chagua msharika kwa namba ya sadaka.");
+    } else if (!lookup) {
+      setErr("Hakuna msharika aliye na namba hii ya sadaka. Angalia namba na ujaribu tena.");
+      return;
+    }
+    const pledgeTitle = offeringTypeName.trim();
+    if (!pledgeTitle) {
+      setErr("Chagua aina ya sadaka.");
       return;
     }
     setPending(true);
     try {
-      const pledgeTitle = useCustomTitle ? customTitle.trim() : title.trim();
-      if (!pledgeTitle) {
-        setErr("Chagua au andika jina la ahadi / sadaka.");
-        return;
-      }
       const fd = new FormData();
-      if (!noOfferingNumber && selected?.memberId) fd.set("member_id", selected.memberId);
+      if (!noOfferingNumber && lookup?.memberId) fd.set("member_id", lookup.memberId);
       fd.set("pledge_date", pledgeDate);
       fd.set("title", pledgeTitle);
       fd.set("amount", String(parseAmountInput(amount)));
       fd.set("paid_amount", String(parseAmountInput(paidAmount)));
-      fd.set("full_name", noOfferingNumber ? manualFullName.trim() : selected?.fullName?.trim() || "");
-      fd.set("phone_number", noOfferingNumber ? manualPhone.trim() : selected?.phone?.trim() || "");
-      fd.set("jumuiya_name", noOfferingNumber ? manualJumuiya.trim() : "");
+      if (noOfferingNumber) {
+        fd.set("full_name", manualFullName.trim());
+        fd.set("phone_number", manualPhone.trim());
+        fd.set("jumuiya_name", manualJumuiya.trim());
+      } else if (lookup) {
+        fd.set("full_name", lookup.fullName.trim());
+        fd.set("phone_number", lookup.phone.trim());
+        fd.set("jumuiya_name", lookup.jumuiyaName.trim());
+        if (!lookup.memberId) {
+          fd.set("full_name", lookup.fullName.trim());
+        }
+      }
       fd.set("batch_slot", String(batchSlot));
       const res = await recordMemberOtherPledge(fd);
       if ("error" in res && res.error) {
@@ -143,22 +144,16 @@ export function OtherPledgesForm({
         return;
       }
       setMsg("Ahadi nyingine imehifadhiwa.");
-      setTitle("");
-      setCustomTitle("");
-      setUseCustomTitle(false);
+      setOfferingTypeName("");
       setAmount("");
       setPaidAmount("");
-      setSelected(null);
+      setLookup(null);
+      setOfferingNumber("");
       setManualFullName("");
       setManualPhone("");
       setManualJumuiya("");
-      if ("batchId" in res && res.batchId) {
-        router.push(
-          `/dashboard/offerings?registeredBatchId=${encodeURIComponent(String(res.batchId))}#registered-offerings`,
-        );
-      } else {
-        router.refresh();
-      }
+      // Refresh tables in the background without navigating away from the form.
+      router.refresh();
     } finally {
       setPending(false);
     }
@@ -186,10 +181,8 @@ export function OtherPledgesForm({
             const next = e.target.checked;
             setNoOfferingNumber(next);
             if (next) {
-              setSelected(null);
-              setSearch("");
-              setHits([]);
-              setLastSearchQuery("");
+              setLookup(null);
+              setOfferingNumber("");
             }
           }}
           className="h-4 w-4 rounded border-input"
@@ -216,127 +209,81 @@ export function OtherPledgesForm({
             </option>
           </select>
         </div>
-        <div className="grid gap-2 sm:col-span-2">
-          <Label htmlFor="pledge-search-offering">Namba ya msharika / asiye sajiliwa</Label>
+        <div className="grid gap-2">
+          <Label htmlFor="pledge-offering-number">Namba ya msharika</Label>
           <Input
-            id="pledge-search-offering"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Andika namba… (tafuta kiotomatiki)"
+            id="pledge-offering-number"
+            value={offeringNumber}
+            onChange={(e) => {
+              setOfferingNumber(e.target.value);
+              setLookup(null);
+            }}
+            onBlur={() => {
+              void runOfferingLookup(offeringNumber);
+            }}
+            placeholder="Andika namba kamili…"
             autoComplete="off"
             disabled={noOfferingNumber}
+            className="font-mono"
           />
-          {searching ? <p className="text-xs text-muted-foreground">Inatafuta…</p> : null}
-          {lastSearchQuery && !searching && hits.length === 0 && !err && search.trim() === lastSearchQuery ? (
-            <p className="text-sm text-muted-foreground">
-              Hakuna msharika aliyepatikana kwa &quot;{lastSearchQuery}&quot;.
-            </p>
-          ) : null}
-          {hits.length > 0 ? (
-            <div className="max-h-40 overflow-y-auto rounded-md border p-2 text-sm">
-              {hits.map((h) => (
-                <button
-                  key={`${h.source}-${h.offeringNumber}`}
-                  type="button"
-                  className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-muted ${
-                    selected?.memberId === h.memberId ? "bg-muted font-medium" : ""
-                  }`}
-                  onClick={() => pickMember(h)}
-                  disabled={noOfferingNumber}
-                >
-                  <span>
-                      <span className="font-mono">{h.offeringNumber}</span> — {toDisplayCaps(h.fullName)}
-                  </span>
-                  <Badge variant={h.source === "member" ? "secondary" : "outline"}>
-                    {h.source === "member" ? "Registered" : "Unregistered"}
-                  </Badge>
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {selected ? (
-            <p className="text-sm text-foreground">
-              Mteuliwa: <span className="font-medium">{toDisplayCaps(selected.fullName)}</span>{" "}
-              <span className="font-mono text-muted-foreground">({selected.offeringNumber})</span>
-            </p>
-          ) : null}
         </div>
-        <div className="grid gap-2">
-          <Label>Jina kamili (asiye sajiliwa)</Label>
+        <div className="grid gap-2 sm:col-span-2">
+          <Label htmlFor="pledge-full-name">Jina kamili</Label>
           <Input
-            value={manualFullName}
+            id="pledge-full-name"
+            value={displayName}
             onChange={(e) => setManualFullName(e.target.value)}
             placeholder="Mfano: Juma Peter"
             disabled={!noOfferingNumber}
+            readOnly={!noOfferingNumber && Boolean(lookup)}
           />
         </div>
         <div className="grid gap-2">
-          <Label>Simu</Label>
+          <Label htmlFor="pledge-phone">Simu</Label>
           <Input
-            value={manualPhone}
+            id="pledge-phone"
+            value={displayPhone}
             onChange={(e) => setManualPhone(e.target.value)}
             placeholder="07..."
             disabled={!noOfferingNumber}
+            readOnly={!noOfferingNumber && Boolean(lookup)}
           />
         </div>
         <div className="grid gap-2">
-          <Label>Jumuiya</Label>
+          <Label htmlFor="pledge-jumuiya">Jumuiya</Label>
           <Input
-            value={manualJumuiya}
+            id="pledge-jumuiya"
+            value={displayJumuiya}
             onChange={(e) => setManualJumuiya(e.target.value)}
             placeholder="Mfano: Mt. Yosefu"
             disabled={!noOfferingNumber}
+            readOnly={!noOfferingNumber && Boolean(lookup)}
           />
         </div>
         <div className="grid gap-2">
-          <Label>Tarehe</Label>
-          <Input type="date" value={pledgeDate} onChange={(e) => setPledgeDate(e.target.value)} />
+          <Label htmlFor="pledge-date">Tarehe</Label>
+          <Input
+            id="pledge-date"
+            type="date"
+            value={pledgeDate}
+            onChange={(e) => setPledgeDate(e.target.value)}
+          />
         </div>
         <div className="grid gap-2 sm:col-span-2">
-          <Label htmlFor="pledge-title">Jina la ahadi / sadaka</Label>
-          {recordedPledgeTitles.length > 0 ? (
-            <>
-              <select
-                id="pledge-title"
-                value={useCustomTitle ? "__custom__" : title}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "__custom__") {
-                    setUseCustomTitle(true);
-                    setTitle("");
-                    return;
-                  }
-                  setUseCustomTitle(false);
-                  setCustomTitle("");
-                  setTitle(v);
-                }}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
-              >
-                <option value="">Chagua ahadi / sadaka…</option>
-                {recordedPledgeTitles.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-                <option value="__custom__">Ingiza jina jipya…</option>
-              </select>
-              {useCustomTitle ? (
-                <Input
-                  value={customTitle}
-                  onChange={(e) => setCustomTitle(e.target.value)}
-                  placeholder="Kwa mfano: Ujenzi…"
-                  autoComplete="off"
-                />
-              ) : null}
-            </>
-          ) : (
-            <Input
-              id="pledge-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Kwa mfano: Ujenzi…"
-            />
-          )}
+          <Label htmlFor="pledge-offering-type">Jina la ahadi / sadaka</Label>
+          <select
+            id="pledge-offering-type"
+            value={offeringTypeName}
+            onChange={(e) => setOfferingTypeName(e.target.value)}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+          >
+            <option value="">Chagua aina ya sadaka…</option>
+            {offeringTypes.map((t) => (
+              <option key={t.id} value={t.name}>
+                {t.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="grid gap-2">
           <Label>Kiasi (TZS)</Label>

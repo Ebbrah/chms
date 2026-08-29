@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getMyOrgId, getMyRoles } from "@/lib/auth/session";
-import { compareOfferingNumberSearchHits } from "@/lib/offering/member-search-rank";
 import {
   canEditPendingOfferings,
   canRecordMidWeekOfferings,
@@ -28,107 +27,165 @@ function sanitizeOfferingSearch(raw: string) {
   return raw.trim().replace(/%/g, "").replace(/_/g, "");
 }
 
-export async function searchMembersByOfferingNumber(query: string) {
+/** Build exact-match candidates (handles leading zeros like 123 → 0123). */
+function offeringNumberLookupVariants(raw: string): string[] {
+  const q = sanitizeOfferingSearch(raw);
+  if (!q) return [];
+
+  const variants = new Set<string>([q]);
+  const digits = q.replace(/[^0-9]/g, "");
+  const isNumericQuery = digits.length > 0 && digits === q.replace(/\s/g, "");
+  if (isNumericQuery) {
+    variants.add(digits);
+    const maxPad = Math.max(8, digits.length + 2);
+    for (let len = digits.length; len <= maxPad; len += 1) {
+      variants.add(digits.padStart(len, "0"));
+    }
+  }
+  return Array.from(variants);
+}
+
+type MemberLookupRow = {
+  id: string;
+  offering_number: string | null;
+  user_id: string | null;
+  phone: string | null;
+  household_id: string | null;
+  member_details: unknown;
+};
+
+type SeedLookupRow = {
+  offering_number: string | null;
+  full_name: string | null;
+  phone: string | null;
+  raw: unknown;
+};
+
+async function findMemberByOfferingVariants(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  variants: string[],
+): Promise<MemberLookupRow | null> {
+  for (const variant of variants) {
+    const { data, error } = await supabase
+      .from("members")
+      .select("id, offering_number, user_id, phone, household_id, member_details")
+      .eq("org_id", orgId)
+      .ilike("offering_number", variant)
+      .maybeSingle();
+    if (error) return null;
+    if (data?.id) return data as MemberLookupRow;
+  }
+  return null;
+}
+
+async function findSeedByOfferingVariants(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  variants: string[],
+): Promise<SeedLookupRow | null> {
+  for (const variant of variants) {
+    const { data, error } = await supabase
+      .from("member_seeds")
+      .select("offering_number, full_name, phone, raw")
+      .eq("org_id", orgId)
+      .ilike("offering_number", variant)
+      .maybeSingle();
+    if (error) return null;
+    if (data?.offering_number) return data as SeedLookupRow;
+  }
+  return null;
+}
+
+export type OfferingNumberLookupRow = {
+  memberId: string | null;
+  offeringNumber: string;
+  fullName: string;
+  phone: string;
+  jumuiyaName: string;
+  source: "member" | "seed";
+};
+
+function fullNameFromMemberDetails(details: unknown): string {
+  if (!details || typeof details !== "object") return "";
+  const raw = (details as Record<string, unknown>).full_name;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function jumuiyaFromSeedRaw(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const obj = raw as Record<string, unknown>;
+  for (const key of ["jumuiya", "Jumuiya", "household", "Household"]) {
+    const v = obj[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+/** Exact offering-number match (same as weekly envelope save) — no fuzzy pick list. */
+export async function lookupMemberByExactOfferingNumber(offeringNumber: string) {
   const supabase = await createClient();
   const orgId = await getMyOrgId();
   if (!orgId) return { error: "No organization" } as const;
 
-  const q = sanitizeOfferingSearch(query);
-  if (!q) {
-    return {
-      rows: [] as {
-        memberId: string | null;
-        offeringNumber: string;
-        fullName: string;
-        phone: string;
-        source: "member" | "seed";
-      }[],
-    };
-  }
+  const q = sanitizeOfferingSearch(offeringNumber);
+  if (!q) return { found: false as const };
 
-  const qCompact = q.replace(/\s+/g, "");
-  const patterns = qCompact && qCompact !== q ? [q, qCompact] : [q];
+  const variants = offeringNumberLookupVariants(q);
+  const member = await findMemberByOfferingVariants(supabase, orgId, variants);
 
-  let rows: { id: string; offering_number: string | null; user_id: string | null }[] = [];
-  for (const pat of patterns) {
-    const res = await supabase
-      .from("members")
-      .select("id, offering_number, user_id")
-      .eq("org_id", orgId)
-      .ilike("offering_number", `%${pat}%`)
-      .order("offering_number", { ascending: true })
-      .limit(20);
-    if (res.error) return { error: res.error.message } as const;
-    rows = res.data ?? [];
-    if (rows.length > 0) break;
-  }
+  if (member?.id) {
+    let fullName = fullNameFromMemberDetails(member.member_details);
+    let phone = String(member.phone ?? "").trim();
 
-  const userIds = Array.from(new Set((rows ?? []).map((r) => String(r.user_id ?? "")).filter(Boolean)));
-  const { data: profs, error: pErr } = userIds.length
-    ? await supabase.from("profiles").select("id, full_name, phone").in("id", userIds)
-    : { data: [], error: null };
-  if (pErr) return { error: pErr.message } as const;
-
-  const nameById = new Map((profs ?? []).map((p) => [String(p.id), String(p.full_name ?? "")]));
-  const phoneById = new Map((profs ?? []).map((p) => [String(p.id), String(p.phone ?? "")]));
-
-  let seedRows: { offering_number: string | null; full_name: string | null; phone: string | null }[] = [];
-  for (const pat of patterns) {
-    const res = await supabase
-      .from("member_seeds")
-      .select("offering_number, full_name, phone")
-      .eq("org_id", orgId)
-      .ilike("offering_number", `%${pat}%`)
-      .order("offering_number", { ascending: true })
-      .limit(20);
-    if (res.error) return { error: res.error.message } as const;
-    seedRows = res.data ?? [];
-    if (seedRows.length > 0) break;
-  }
-
-  const merged = new Map<
-    string,
-    {
-      memberId: string | null;
-      offeringNumber: string;
-      fullName: string;
-      phone: string;
-      source: "member" | "seed";
+    if (member.user_id) {
+      const { data: prof } = await supabase
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", member.user_id)
+        .maybeSingle();
+      const profileName = String(prof?.full_name ?? "").trim();
+      const profilePhone = String(prof?.phone ?? "").trim();
+      if (profileName) fullName = profileName;
+      if (profilePhone) phone = profilePhone;
     }
-  >();
 
-  for (const r of rows ?? []) {
-    const offeringNumber = String(r.offering_number ?? "").trim();
-    if (!offeringNumber) continue;
-    const key = offeringNumber.toLowerCase();
-    merged.set(key, {
-      memberId: String(r.id),
-      offeringNumber,
-      fullName: nameById.get(String(r.user_id)) ?? "—",
-      phone: phoneById.get(String(r.user_id)) ?? "",
+    let jumuiyaName = "";
+    if (member.household_id) {
+      const { data: household } = await supabase
+        .from("households")
+        .select("name")
+        .eq("id", String(member.household_id))
+        .maybeSingle();
+      jumuiyaName = String(household?.name ?? "").trim();
+    }
+
+    const row: OfferingNumberLookupRow = {
+      memberId: String(member.id),
+      offeringNumber: String(member.offering_number ?? q).trim(),
+      fullName: fullName || "—",
+      phone,
+      jumuiyaName,
       source: "member",
-    });
+    };
+    return { found: true as const, row };
   }
 
-  for (const s of seedRows ?? []) {
-    const offeringNumber = String(s.offering_number ?? "").trim();
-    if (!offeringNumber) continue;
-    const key = offeringNumber.toLowerCase();
-    if (merged.has(key)) continue;
-    merged.set(key, {
+  const seed = await findSeedByOfferingVariants(supabase, orgId, variants);
+
+  if (seed?.offering_number) {
+    const row: OfferingNumberLookupRow = {
       memberId: null,
-      offeringNumber,
-      fullName: String(s.full_name ?? "").trim() || "—",
-      phone: String(s.phone ?? "").trim(),
+      offeringNumber: String(seed.offering_number).trim(),
+      fullName: String(seed.full_name ?? "").trim() || "—",
+      phone: String(seed.phone ?? "").trim(),
+      jumuiyaName: jumuiyaFromSeedRaw(seed.raw),
       source: "seed",
-    });
+    };
+    return { found: true as const, row };
   }
 
-  const rowsOut = Array.from(merged.values()).sort((a, b) =>
-    compareOfferingNumberSearchHits(q, a.offeringNumber, b.offeringNumber),
-  );
-
-  return { rows: rowsOut };
+  return { found: false as const };
 }
 
 export async function recordMemberOtherPledge(formData: FormData) {

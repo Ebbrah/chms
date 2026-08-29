@@ -71,7 +71,7 @@ export default async function OfferingReportsPage({
     ? await supabase
         .from("offering_week_batches")
         .select(
-          "week_start_date, week_end_date, batch_slot, men_attendance_count, women_attendance_count, sunday_school_children_count, status",
+          "week_start_date, week_end_date, batch_slot, service_leader, preacher, adults_attendance_count, children_attendance_count, status",
         )
         .in("batch_slot", [1, 2])
         .lte("week_start_date", endDate)
@@ -83,21 +83,20 @@ export default async function OfferingReportsPage({
   const attendanceRows = (attendanceBatches ?? []).map((b) => ({
     weekLabel: `${String(b.week_start_date)} → ${String(b.week_end_date)}`,
     batchLabel: offeringBatchSlotLabel(Number(b.batch_slot ?? 1)),
-    men: b.men_attendance_count != null ? Number(b.men_attendance_count) : null,
-    women: b.women_attendance_count != null ? Number(b.women_attendance_count) : null,
-    children:
-      b.sunday_school_children_count != null ? Number(b.sunday_school_children_count) : null,
+    serviceLeader: b.service_leader ?? null,
+    preacher: b.preacher ?? null,
+    adults: b.adults_attendance_count != null ? Number(b.adults_attendance_count) : null,
+    children: b.children_attendance_count != null ? Number(b.children_attendance_count) : null,
     status: String(b.status ?? ""),
   }));
 
   const attendanceTotals = attendanceRows.reduce(
     (acc, row) => {
-      if (row.men != null) acc.men += row.men;
-      if (row.women != null) acc.women += row.women;
+      if (row.adults != null) acc.adults += row.adults;
       if (row.children != null) acc.children += row.children;
       return acc;
     },
-    { men: 0, women: 0, children: 0 },
+    { adults: 0, children: 0 },
   );
 
   const { data: members } = await supabase
@@ -181,7 +180,7 @@ export default async function OfferingReportsPage({
       {showAttendanceSummary ? (
         <div className="space-y-3 rounded-md border border-border p-4">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Mahudhurio (Attendance)</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Taarifa za Ibada</h2>
             <p className="text-sm text-muted-foreground">
               Sunday service batches 1 &amp; 2 — {label}
             </p>
@@ -192,17 +191,18 @@ export default async function OfferingReportsPage({
                 <TableRow>
                   <TableHead>Church week</TableHead>
                   <TableHead>Batch</TableHead>
-                  <TableHead className="text-right">Wanaume</TableHead>
-                  <TableHead className="text-right">Wanawake</TableHead>
-                  <TableHead className="text-right">Watoto (Shule ya Jumapili)</TableHead>
+                  <TableHead>Kiongozi wa Ibada</TableHead>
+                  <TableHead>Mhubiri</TableHead>
+                  <TableHead className="text-right">Mahudhurio watu wazima</TableHead>
+                  <TableHead className="text-right">Mahudhurio watoto</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {attendanceRows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No attendance recorded for this period.
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      No service info recorded for this period.
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -211,11 +211,10 @@ export default async function OfferingReportsPage({
                       <TableRow key={`${row.weekLabel}-${row.batchLabel}-${idx}`}>
                         <TableCell>{row.weekLabel}</TableCell>
                         <TableCell>{row.batchLabel}</TableCell>
+                        <TableCell>{row.serviceLeader ?? "—"}</TableCell>
+                        <TableCell>{row.preacher ?? "—"}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {row.men != null ? row.men.toLocaleString() : "—"}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {row.women != null ? row.women.toLocaleString() : "—"}
+                          {row.adults != null ? row.adults.toLocaleString() : "—"}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {row.children != null ? row.children.toLocaleString() : "—"}
@@ -226,11 +225,10 @@ export default async function OfferingReportsPage({
                     <TableRow>
                       <TableCell className="font-semibold">Total</TableCell>
                       <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
+                      <TableCell>—</TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">
-                        {attendanceTotals.men.toLocaleString()}
-                      </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums">
-                        {attendanceTotals.women.toLocaleString()}
+                        {attendanceTotals.adults.toLocaleString()}
                       </TableCell>
                       <TableCell className="text-right font-semibold tabular-nums">
                         {attendanceTotals.children.toLocaleString()}

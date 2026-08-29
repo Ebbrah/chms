@@ -375,17 +375,55 @@ function parseAmount(v: unknown): number {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : 0;
 }
 
-export type BatchServiceAttendanceInput = {
-  menAttendance: number | null;
-  womenAttendance: number | null;
-  sundaySchoolChildren: number | null;
+export type BatchServiceInfoInput = {
+  serviceLeader: string | null;
+  preacher: string | null;
+  adultsAttendance: number | null;
+  childrenAttendance: number | null;
 };
+
+/** @deprecated Use BatchServiceInfoInput */
+export type BatchServiceAttendanceInput = BatchServiceInfoInput;
 
 function parseAttendanceCount(v: unknown): number | null {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.floor(n);
+}
+
+function parseServiceText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s.length > 0 ? s : null;
+}
+
+type BatchServiceInfoRow = {
+  service_leader?: string | null;
+  preacher?: string | null;
+  adults_attendance_count?: number | null;
+  children_attendance_count?: number | null;
+};
+
+function isBatchServiceInfoComplete(info: BatchServiceInfoRow): boolean {
+  return (
+    parseServiceText(info.service_leader) !== null &&
+    parseServiceText(info.preacher) !== null &&
+    parseAttendanceCount(info.adults_attendance_count) !== null &&
+    parseAttendanceCount(info.children_attendance_count) !== null
+  );
+}
+
+const BATCH_SERVICE_INFO_REQUIRED_MSG =
+  "Jaza taarifa za ibada (Kiongozi wa Ibada, Mhubiri, na mahudhurio) kabla ya kuendelea.";
+
+function normalizeBatchServiceInfo(attendance: BatchServiceInfoInput) {
+  return {
+    serviceLeader: parseServiceText(attendance.serviceLeader),
+    preacher: parseServiceText(attendance.preacher),
+    adultsAttendance: parseAttendanceCount(attendance.adultsAttendance),
+    childrenAttendance: parseAttendanceCount(attendance.childrenAttendance),
+  };
 }
 
 function isSundayServiceBatchSlot(slot: number): boolean {
@@ -415,7 +453,12 @@ export async function getBatchServiceAttendance(weekOfDateIso: string, batchSlot
     return { error: "Invalid batch" } as const;
   }
   if (!isSundayServiceBatchSlot(slot)) {
-    return { menAttendance: null, womenAttendance: null, sundaySchoolChildren: null } as const;
+    return {
+      serviceLeader: null,
+      preacher: null,
+      adultsAttendance: null,
+      childrenAttendance: null,
+    } as const;
   }
 
   const bounds = weekBoundsFromIso(weekOfDateIso);
@@ -435,7 +478,9 @@ export async function getBatchServiceAttendance(weekOfDateIso: string, batchSlot
 
   const { data: batch, error } = await supabase
     .from("offering_week_batches")
-    .select("men_attendance_count, women_attendance_count, sunday_school_children_count, status")
+    .select(
+      "service_leader, preacher, adults_attendance_count, children_attendance_count, status",
+    )
     .eq("org_id", orgId)
     .eq("week_start_date", bounds.startStr)
     .eq("week_end_date", bounds.endStr)
@@ -447,26 +492,25 @@ export async function getBatchServiceAttendance(weekOfDateIso: string, batchSlot
   if (error) return { error: error.message } as const;
 
   return {
-    menAttendance:
-      batch?.men_attendance_count != null ? Number(batch.men_attendance_count) : null,
-    womenAttendance:
-      batch?.women_attendance_count != null ? Number(batch.women_attendance_count) : null,
-    sundaySchoolChildren:
-      batch?.sunday_school_children_count != null
-        ? Number(batch.sunday_school_children_count)
-        : null,
+    serviceLeader: batch?.service_leader ?? null,
+    preacher: batch?.preacher ?? null,
+    adultsAttendance:
+      batch?.adults_attendance_count != null ? Number(batch.adults_attendance_count) : null,
+    childrenAttendance:
+      batch?.children_attendance_count != null ? Number(batch.children_attendance_count) : null,
     editable:
       !batch?.status ||
       batch.status === "pending_authorization" ||
       batch.status === "rejected",
+    approved: batch?.status === "approved",
   } as const;
 }
 
-/** Save mass / Sunday-school attendance for batch 1 or 2 without recording offerings. */
+/** Save Taarifa za Ibada for batch 1 or 2 without recording offerings. */
 export async function saveBatchServiceAttendance(
   weekOfDateIso: string,
   batchSlot: number,
-  attendance: BatchServiceAttendanceInput,
+  attendance: BatchServiceInfoInput,
 ) {
   const roles = await getMyRoles();
   if (!canRecordWeeklyOfferings(roles)) return { error: "Unauthorized" };
@@ -474,14 +518,12 @@ export async function saveBatchServiceAttendance(
   const slot = Math.floor(batchSlot);
   if (!Number.isFinite(slot) || slot < 1 || slot > 100) return { error: "Invalid batch" };
   if (!isSundayServiceBatchSlot(slot)) {
-    return { error: "Attendance is recorded for Sunday service batches 1 and 2 only" };
+    return { error: "Taarifa za ibada zinaweza kurekodiwa kwa batch 1 na 2 tu" };
   }
 
-  const menAttendance = parseAttendanceCount(attendance.menAttendance);
-  const womenAttendance = parseAttendanceCount(attendance.womenAttendance);
-  const sundaySchoolChildren = parseAttendanceCount(attendance.sundaySchoolChildren);
-  if (menAttendance === null && womenAttendance === null && sundaySchoolChildren === null) {
-    return { error: "Enter at least one attendance count" };
+  const info = normalizeBatchServiceInfo(attendance);
+  if (!isBatchServiceInfoComplete(info)) {
+    return { error: BATCH_SERVICE_INFO_REQUIRED_MSG };
   }
 
   const supabase = await createClient();
@@ -511,10 +553,12 @@ export async function saveBatchServiceAttendance(
   });
   if (batch.error || !batch.batchId) return { error: batch.error ?? "batch failed" };
 
-  const patch: Record<string, number | null> = {};
-  if (menAttendance !== null) patch.men_attendance_count = menAttendance;
-  if (womenAttendance !== null) patch.women_attendance_count = womenAttendance;
-  if (sundaySchoolChildren !== null) patch.sunday_school_children_count = sundaySchoolChildren;
+  const patch = {
+    service_leader: info.serviceLeader,
+    preacher: info.preacher,
+    adults_attendance_count: info.adultsAttendance,
+    children_attendance_count: info.childrenAttendance,
+  };
 
   const { error: updErr } = await supabase
     .from("offering_week_batches")
@@ -536,7 +580,7 @@ export async function saveWeeklyOfferingBatch(
   weekOfDateIso: string,
   rows: WeeklyOfferingRowInput[],
   batchSlot: number = OFFERING_BATCH_SLOT_FIRST_SERVICE,
-  attendance?: BatchServiceAttendanceInput,
+  attendance?: BatchServiceInfoInput,
 ) {
   const roles = await getMyRoles();
   const supabase = await createClient();
@@ -652,13 +696,12 @@ export async function saveWeeklyOfferingBatch(
   };
 
   if (isSundayServiceBatchSlot(batchSlot) && attendance) {
-    const menAttendance = parseAttendanceCount(attendance.menAttendance);
-    const womenAttendance = parseAttendanceCount(attendance.womenAttendance);
-    const sundaySchoolChildren = parseAttendanceCount(attendance.sundaySchoolChildren);
-    if (menAttendance !== null) batchPatch.men_attendance_count = menAttendance;
-    if (womenAttendance !== null) batchPatch.women_attendance_count = womenAttendance;
-    if (sundaySchoolChildren !== null) {
-      batchPatch.sunday_school_children_count = sundaySchoolChildren;
+    const info = normalizeBatchServiceInfo(attendance);
+    if (info.serviceLeader) batchPatch.service_leader = info.serviceLeader;
+    if (info.preacher) batchPatch.preacher = info.preacher;
+    if (info.adultsAttendance !== null) batchPatch.adults_attendance_count = info.adultsAttendance;
+    if (info.childrenAttendance !== null) {
+      batchPatch.children_attendance_count = info.childrenAttendance;
     }
   }
 
@@ -784,13 +827,20 @@ export async function approveOfferingWeekBatch(batchId: string) {
 
     const { data: batch, error: bErr } = await supabase
       .from("offering_week_batches")
-      .select("id,status,org_id")
+      .select(
+        "id,status,org_id,batch_slot,service_leader,preacher,adults_attendance_count,children_attendance_count",
+      )
       .eq("id", batchId)
       .eq("org_id", orgId)
       .single();
 
     if (bErr || !batch) return { error: "Batch not found" };
     if (batch.status !== "authorized") return { error: "Batch must be authorized first" };
+
+    const batchSlot = Number((batch as { batch_slot?: number }).batch_slot ?? 1);
+    if (isSundayServiceBatchSlot(batchSlot) && !isBatchServiceInfoComplete(batch)) {
+      return { error: BATCH_SERVICE_INFO_REQUIRED_MSG };
+    }
 
     const { data: lines, error: lErr } = await supabase
       .from("offerings")
@@ -915,13 +965,20 @@ export async function authorizeOfferingWeekBatch(batchId: string) {
 
   const { data: batch, error } = await supabase
     .from("offering_week_batches")
-    .select("id,status")
+    .select(
+      "id,status,batch_slot,service_leader,preacher,adults_attendance_count,children_attendance_count",
+    )
     .eq("id", batchId)
     .eq("org_id", orgId)
     .single();
   if (error || !batch) return { error: "Batch not found" };
   if (!["pending_authorization", "rejected"].includes(batch.status)) {
     return { error: "Only pending or rejected batches can be authorized" };
+  }
+
+  const batchSlot = Number((batch as { batch_slot?: number }).batch_slot ?? 1);
+  if (isSundayServiceBatchSlot(batchSlot) && !isBatchServiceInfoComplete(batch)) {
+    return { error: BATCH_SERVICE_INFO_REQUIRED_MSG };
   }
 
   const { error: upErr } = await supabase
