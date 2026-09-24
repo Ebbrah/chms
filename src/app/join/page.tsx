@@ -1,9 +1,19 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getParishJoinOptions } from "@/lib/platform/parish-join-options";
 import { ParishJoinPicker } from "@/app/join/parish-join-picker";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  getSingleParishJoinSlug,
+  isSingleParishDeployment,
+} from "@/lib/deployment";
 
 export default async function JoinPickerPage() {
+  if (isSingleParishDeployment()) {
+    const slug = getSingleParishJoinSlug();
+    if (slug) redirect(`/join/${slug}`);
+  }
+
   const options = await getParishJoinOptions();
 
   return (

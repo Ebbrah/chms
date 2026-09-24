@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isSingleParishDeployment } from "@/lib/deployment";
 
 export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
@@ -53,6 +54,15 @@ export async function updateSession(request: NextRequest) {
     from.cookies.getAll().forEach((c) => {
       to.cookies.set(c.name, c.value);
     });
+  }
+
+  if (
+    isSingleParishDeployment() &&
+    (path.startsWith("/platform") || path.startsWith("/regional"))
+  ) {
+    const redirect = NextResponse.redirect(new URL("/dashboard", request.url));
+    copyCookies(supabaseResponse, redirect);
+    return redirect;
   }
 
   const isAuthEntry =
