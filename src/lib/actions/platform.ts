@@ -8,6 +8,7 @@ import {
   type OrgFeatureKey,
   type OrgFeatureFlags,
 } from "@/lib/platform/org-features";
+import type { OrgAuthMode } from "@/lib/platform/org-auth-mode";
 import { createClient } from "@/lib/supabase/server";
 
 async function requireAdmin() {
@@ -117,6 +118,9 @@ export async function provisionParish(formData: FormData) {
   const firstAdminEmail = String(formData.get("first_admin_email") ?? "")
     .trim()
     .toLowerCase();
+  const authModeRaw = String(formData.get("auth_mode") ?? "email").trim() as OrgAuthMode;
+  const authMode: OrgAuthMode =
+    authModeRaw === "whatsapp" || authModeRaw === "both" ? authModeRaw : "email";
 
   if (!districtId || !displayName || !slug) {
     return { error: "Jimbo, parish name, and slug are required" };
@@ -144,8 +148,16 @@ export async function provisionParish(formData: FormData) {
   if (error) return { error: error.message };
   if (!orgId) return { error: "Parish provisioning failed" };
 
+  const { data: orgRow } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", orgId)
+    .maybeSingle();
+
+  const settings = (orgRow?.settings ?? {}) as Record<string, unknown>;
   const updates: Record<string, unknown> = {
     fiscal_year_start_month: fiscalStartMonth,
+    settings: { ...settings, auth_mode: authMode },
   };
 
   if (logoDataUrl) {
@@ -191,6 +203,25 @@ export async function provisionParish(formData: FormData) {
   revalidatePath("/platform/parishes");
   revalidatePath("/platform");
   redirect(`/platform/parishes/${orgId}?created=1`);
+}
+
+export async function updateParishAuthMode(orgId: string, mode: OrgAuthMode) {
+  const gate = await requireAdmin();
+  if ("error" in gate) return gate;
+
+  const authMode: OrgAuthMode =
+    mode === "whatsapp" || mode === "both" || mode === "email" ? mode : "email";
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("update_org_auth_mode", {
+    _org_id: orgId,
+    _mode: authMode,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/platform/parishes/${orgId}`);
+  revalidatePath("/platform/parishes");
+  return { ok: true };
 }
 
 export async function updateParishFeatures(orgId: string, features: OrgFeatureFlags) {

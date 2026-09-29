@@ -137,6 +137,11 @@ const links: {
     visible: (r) => canManageRoles(r),
   },
   {
+    href: "/dashboard/settings/authentication",
+    label: "Authentication",
+    visible: (r) => canManageRoles(r),
+  },
+  {
     href: "/dashboard/settings/committees",
     label: "Committees",
     visible: (r) => canManageRoles(r),
@@ -149,6 +154,11 @@ const links: {
   {
     href: "/dashboard/settings/sms",
     label: "SMS",
+    visible: (r) => canManageRoles(r) || canFinance(r),
+  },
+  {
+    href: "/dashboard/settings/whatsapp",
+    label: "WhatsApp",
     visible: (r) => canManageRoles(r) || canFinance(r),
   },
 ];

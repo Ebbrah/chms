@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ORG_AUTH_MODE_LABELS, type OrgAuthMode } from "@/lib/platform/org-auth-mode";
 
 type Diocese = { id: string; name: string; code: string };
 type District = { id: string; diocese_id: string; name: string; code: string };
@@ -126,6 +127,25 @@ export function NewParishForm({
             />
             <p className="text-xs text-muted-foreground">
               Used for /join/your-slug. Lowercase letters, numbers, hyphens.
+            </p>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="auth_mode">Member authentication</Label>
+            <Select name="auth_mode" defaultValue="email">
+              <SelectTrigger id="auth_mode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(ORG_AUTH_MODE_LABELS) as OrgAuthMode[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {ORG_AUTH_MODE_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Parishes can change this later without affecting existing accounts.
             </p>
           </div>
 

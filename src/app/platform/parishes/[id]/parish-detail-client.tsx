@@ -6,9 +6,11 @@ import {
   assignParishOperator,
   removeParishOperator,
   setParishStatus,
+  updateParishAuthMode,
   updateParishFeatures,
   updateParishLogo,
 } from "@/lib/actions/platform";
+import { ParishAuthModeForm } from "@/components/settings/parish-auth-mode-form";
 import {
   DEFAULT_ORG_FEATURES,
   type OrgFeatureKey,
@@ -168,6 +170,18 @@ export function ParishDetailClient({
         </CardHeader>
         <CardContent>
           <Input type="file" accept="image/*" onChange={onLogoChange} />
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="text-lg">Member authentication</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ParishAuthModeForm
+            settings={settings}
+            onSave={(mode) => updateParishAuthMode(orgId, mode)}
+          />
         </CardContent>
       </Card>
 

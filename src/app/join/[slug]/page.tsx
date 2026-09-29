@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignupForm } from "@/app/signup/signup-form";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { readOrgAuthMode, type OrgAuthMode } from "@/lib/platform/org-auth-mode";
 
 type ParishPublic = {
   id: string;
@@ -10,6 +11,7 @@ type ParishPublic = {
   slug: string | null;
   logo_url: string | null;
   status: string;
+  auth_mode?: OrgAuthMode;
 };
 
 export default async function JoinParishPage({
@@ -28,6 +30,7 @@ export default async function JoinParishPage({
 
   const parish = rows[0] as ParishPublic;
   const parishName = parish.display_name ?? slug;
+  const authMode = parish.auth_mode ?? readOrgAuthMode(null);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
@@ -47,10 +50,10 @@ export default async function JoinParishPage({
           </p>
         </CardHeader>
         <CardContent>
-          <SignupForm parishSlug={slug} parishName={parishName} />
+          <SignupForm parishSlug={slug} parishName={parishName} authMode={authMode} />
         </CardContent>
         <CardFooter className="flex justify-center text-sm text-muted-foreground">
-          <Link href="/login" className="underline underline-offset-4">
+          <Link href={`/login?parish=${slug}`} className="underline underline-offset-4">
             Already have an account? Sign in
           </Link>
         </CardFooter>
