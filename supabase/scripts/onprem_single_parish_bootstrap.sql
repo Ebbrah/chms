@@ -7,7 +7,10 @@ SET
   name = 'Kanisa la KLC',
   display_name = 'Kanisa la KLC',
   slug = 'klc',
-  timezone = 'Africa/Dar_es_Salaam'
+  timezone = 'Africa/Dar_es_Salaam',
+  -- Same verified sign-in as Ebenezer: WhatsApp OTP, not email/password.
+  -- Email confirmation was left off for VM-only access; do not rely on it here.
+  settings = COALESCE(settings, '{}'::jsonb) || '{"auth_mode":"whatsapp"}'::jsonb
 WHERE id = '00000000-0000-4000-8000-000000000001';
 
 UPDATE public.org_certificate_settings
